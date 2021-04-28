@@ -1,18 +1,25 @@
+//! expOS is a tiny Operating System focused on experimentation.
+
 #![no_std]
 #![no_main]
+#![feature(asm, panic_info_message)]
 
-use core::panic::PanicInfo;
+mod cpu;
+mod panic;
+mod serial;
+mod uefi;
 
-#[panic_handler]
-fn panic_handler(_panic_info: &PanicInfo) -> ! {
-    loop {}
-}
-
+/// UEFI entry point.
 #[no_mangle]
-fn efi_main() -> ! {
-    unsafe {
-        core::ptr::read(0x4142434445464748 as *const u8);
-    }
+extern "C" fn efi_main(
+    image_handler: uefi::EfiHandle,
+    system_table: uefi::EfiSystemTable,
+) -> ! {
+    // Initialize serial.
+    serial::init_serial();
 
-    loop {}
+    println!("image_handler: {:#x?}", image_handler);
+    println!("system_table: {:#x?}", system_table);
+
+    panic!("end");
 }

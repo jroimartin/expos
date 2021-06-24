@@ -7,19 +7,20 @@
 mod cpu;
 mod panic;
 mod serial;
+mod ticket_mutex;
 mod uefi;
 
 /// UEFI entry point.
 #[no_mangle]
 extern "C" fn efi_main(
     image_handler: uefi::EfiHandle,
-    system_table: uefi::EfiSystemTable,
+    system_table: *mut uefi::EfiSystemTable,
 ) -> ! {
     // Initialize serial.
     serial::init_serial();
 
     println!("image_handler: {:#x?}", image_handler);
-    println!("system_table: {:#x?}", system_table);
+    unsafe { println!("system_table: {:#x?}", *system_table) };
 
     panic!("end");
 }

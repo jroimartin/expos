@@ -7,10 +7,10 @@
 use core::fmt::{self, Write};
 
 use crate::cpu::{in8, out8};
+use crate::ticket_mutex::TicketMutex;
 
 /// Static variable that provides access to the COM1 serial port.
-/// FIXME: Protect the `SerialPort` with a spin lock, so it's concurrent-safe.
-static mut COM1: Option<SerialPort> = None;
+static COM1: TicketMutex<Option<SerialPort>> = TicketMutex::new(None);
 
 /// Typically, COM1's IO port address.
 /// FIXME: Do not use a fixed address, get it from UEFI.
@@ -25,8 +25,9 @@ struct SerialPort(u16);
 
 /// Initialize COM1 serial. It is used by `print!`.
 pub fn init_serial() {
+    let mut com = COM1.lock();
     unsafe {
-        COM1 = Some(SerialPort::new(COM1_ADDRESS).unwrap());
+        *com = Some(SerialPort::new(COM1_ADDRESS).unwrap());
     }
 }
 
@@ -124,10 +125,9 @@ pub struct SerialWriter;
 
 impl Write for SerialWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        unsafe {
-            if let Some(serial) = &COM1 {
-                serial.write(s);
-            }
+        let com = COM1.lock();
+        if let Some(serial) = com.as_ref() {
+            serial.write(s);
         }
         Ok(())
     }
@@ -137,18 +137,17 @@ impl Write for SerialWriter {
 macro_rules! print {
     ($($arg:tt)*) => {
         // In the case of a `SeriaWriter`, `write_str` cannot fail, so
-        // we can safely ignore the returned result.
-        let _ = core::fmt::Write::write_fmt(
+        // we can safely unwrap the returned result.
+        core::fmt::Write::write_fmt(
             &mut $crate::serial::SerialWriter,
             format_args!($($arg)*)
-        );
+        ).unwrap()
     }
 }
 
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {
-        $crate::print!($($arg)*);
-        $crate::print!("\n");
+        $crate::print!("{}\n", format_args!($($arg)*))
     }
 }

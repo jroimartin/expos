@@ -2,7 +2,8 @@
 
 use core::panic::PanicInfo;
 
-use crate::cpu::hlt;
+use cpu::hlt;
+
 use crate::println;
 
 /// Panic handler.

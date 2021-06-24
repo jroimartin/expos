@@ -2,12 +2,10 @@
 
 #![no_std]
 #![no_main]
-#![feature(asm, panic_info_message)]
+#![feature(panic_info_message)]
 
-mod cpu;
 mod panic;
 mod serial;
-mod ticket_mutex;
 mod uefi;
 
 /// UEFI entry point.

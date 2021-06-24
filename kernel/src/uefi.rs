@@ -1,18 +1,39 @@
 //! UEFI primitives.
 
-/// Corresponds to the type `EFI_HANDLE` of the UEFI specification.
+/// The type `EFI_HANDLE` of the UEFI specification.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct EfiHandle(usize);
+pub struct EfiHandle(pub usize);
 
 /// Represents a pointer in an UEFI structure.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct EfiPtr(usize);
+pub struct EfiPtr(pub usize);
 
-/// Corresponds to the type `EFI_SYSTEM_TABLE` of the UEFI specification.
-/// Provides access to UEFI Boot Services, UEFI Runtime Services, consoles,
-/// firmware vendor information and the system configuration tables.
+/// The type `EFI_GUID` of the UEFI specification.
+#[derive(Debug)]
+#[repr(C)]
+pub struct EfiGuid {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+
+/// The type `EFI_TABLE_HEADER` of the UEFI specification.
+#[derive(Debug)]
+#[repr(C)]
+pub struct EfiTableHeader {
+    pub signature: u64,
+    pub revision: u32,
+    pub header_size: u32,
+    pub crc32: u32,
+    pub reserved: u32,
+}
+
+/// The type `EFI_SYSTEM_TABLE` of the UEFI specification. Provides access to
+/// UEFI Boot Services, UEFI Runtime Services, consoles, firmware vendor
+/// information and the system configuration tables.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EfiSystemTable {
@@ -31,13 +52,15 @@ pub struct EfiSystemTable {
     pub configuration_table: EfiPtr,
 }
 
-/// Corresponds to the type `EFI_TABLE_HEADER` of the UEFI specification.
+/// The type `EFI_BOOT_SERVICES` of the UEFI specification. It contains
+/// pointers to all of the boot services.
 #[derive(Debug)]
 #[repr(C)]
-pub struct EfiTableHeader {
-    pub signature: u64,
-    pub revision: u32,
-    pub header_size: u32,
-    pub crc32: u32,
-    pub reserved: u32,
+pub struct EfiBootServices {}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct EfiConfigurationTable {
+    pub vendor_guid: EfiGuid,
+    pub vendor_table: EfiPtr,
 }

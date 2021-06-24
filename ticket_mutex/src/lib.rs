@@ -7,6 +7,8 @@
 //!
 //! [ref]: http://web.mit.edu/6.173/www/currentsemester/readings/R06-scalable-synchronization-1991.pdf
 
+#![no_std]
+
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -55,7 +57,7 @@ unsafe impl<T: Send> Sync for TicketMutex<T> {}
 /// structure is dropped (falls out of scope), the lock will be unlocked.
 ///
 /// The data protected by the mutex can be accessed through this guard via its
-/// Deref and DerefMut implementations.
+/// `Deref` and `DerefMut` implementations.
 ///
 /// This structure is created by the `lock` method on `TicketMutex`.
 pub struct TicketMutexGuard<'a, T> {

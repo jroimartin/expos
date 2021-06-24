@@ -1,10 +1,8 @@
 [package]
-name = "kernel"
+name = "serial"
 version = "0.1.0"
 edition = "2018"
 publish = false
 
 [dependencies]
 cpu = { path = "../cpu" }
-serial = { path = "../serial" }
-ticket_mutex = { path = "../ticket_mutex" }

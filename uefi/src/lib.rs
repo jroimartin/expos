@@ -1,4 +1,6 @@
-//! UEFI primitives.
+//! UEFI parsing primitives.
+
+#![no_std]
 
 /// The type `EFI_HANDLE` of the UEFI specification.
 #[derive(Debug)]

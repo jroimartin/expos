@@ -6,7 +6,6 @@
 
 mod panic;
 mod serial;
-mod uefi;
 
 /// UEFI entry point.
 #[no_mangle]

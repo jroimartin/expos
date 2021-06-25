@@ -1,4 +1,4 @@
-//! Serial port writer.
+//! Primitives to output and read data via serial port.
 
 use core::fmt::{self, Write};
 
@@ -33,6 +33,7 @@ impl Write for SerialWriter {
     }
 }
 
+/// Prints to the serial port.
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
@@ -45,6 +46,7 @@ macro_rules! print {
     }
 }
 
+/// Prints to the serial port, with a newline.
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {

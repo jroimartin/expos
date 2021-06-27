@@ -3,6 +3,7 @@
 #![no_std]
 
 use core::ops::Deref;
+use core::convert::{TryFrom, TryInto};
 
 mod utils;
 
@@ -15,8 +16,258 @@ pub enum Error {
     /// The CRC32 checksum of the table does not match the expected one.
     InvalidCheckSum,
 
-    /// Unknown UEFI Error.
-    Unknown(u32),
+    /// Invalid status code conversion.
+    InvalidStatusConversion,
+
+    /// The returned status code is an error.
+    StatusError(Status),
+}
+
+/// Represents an UEFI status code.
+#[derive(Debug)]
+pub enum Status {
+    /// Success status code.
+    Success,
+
+    /// Warning status code.
+    Warning(StatusWarning),
+
+    /// Error status code.
+    Error(StatusError),
+}
+
+/// Represents an UEFI warning status code.
+#[derive(Debug)]
+pub enum StatusWarning {
+    /// The string contained one or more characters that the device could not
+    /// render and were skipped.
+    UnknownGlyph,
+
+    /// The handle was closed, but the file was not deleted.
+    DeleteFailure,
+
+    /// The handle was closed, but the data to the file was not flushed
+    /// properly.
+    WriteFailure,
+
+    /// The resulting buffer was too small, and the data was truncated to the
+    /// buffer size.
+    BufferTooSmall,
+
+    /// The data has not been updated within the timeframe set by local policy
+    /// for this type of data.
+    StaleData,
+
+    /// The resulting buffer contains UEFI-compliant file system.
+    FileSystem,
+
+    /// The operation will be processed across a system reset.
+    ResetRequired,
+
+    /// Unknown `EFI_STATUS` warning code.
+    Unknown(usize),
+}
+
+impl TryFrom<usize> for StatusWarning {
+    type Error = Error;
+
+    fn try_from(status: usize) -> Result<Self, Self::Error> {
+        // Code 0 is reserved for success and warnings must have the highest
+        // bit clear.
+        if status == 0 || status >> (usize::BITS - 1) == 1 {
+            return Err(Error::InvalidStatusConversion);
+        }
+
+        match status {
+            1 => Ok(StatusWarning::UnknownGlyph),
+            2 => Ok(StatusWarning::DeleteFailure),
+            3 => Ok(StatusWarning::WriteFailure),
+            4 => Ok(StatusWarning::BufferTooSmall),
+            5 => Ok(StatusWarning::StaleData),
+            6 => Ok(StatusWarning::FileSystem),
+            7 => Ok(StatusWarning::ResetRequired),
+            _ => Ok(StatusWarning::Unknown(status)),
+        }
+    }
+}
+
+/// Represents an UEFI error status code.
+#[derive(Debug)]
+pub enum StatusError {
+    /// The image failed to load.
+    LoadError,
+
+    /// A parameter was incorrect.
+    InvalidParameter,
+
+    /// The operation is not supported.
+    Unsupported,
+
+    /// The buffer was not the proper size for the request.
+    BadBufferSize,
+
+    /// The buffer is not large enough to hold the requested data. The required
+    /// buffer size is returned in the appropriate parameter when this error
+    /// occurs.
+    BufferTooSmall,
+
+    /// There is no data pending upon return.
+    NotReady,
+
+    /// The physical device reported anerror while attempting the operation.
+    DeviceError,
+
+    /// The device cannot be written to.
+    WriteProtected,
+
+    /// A resource has run out.
+    OutOfResources,
+
+    /// An inconstancy was detected on the file system causing the operating to
+    /// fail.
+    VolumeCorrupted,
+
+    /// There is no more space on the file system.
+    VolumeFull,
+
+    /// The device does not contain any medium to perform the operation.
+    NoMedia,
+
+    /// The medium in the device has changed since the last access.
+    MediaChanged,
+
+    /// The item was not found.
+    NotFound,
+
+    /// Access was denied.
+    ACcessDenied,
+
+    /// The server was not found or did not respond to the request.
+    NoResponse,
+
+    /// A mapping to a device does not exist.
+    NoMapping,
+
+    /// The timeout time expired.
+    Timeout,
+
+    /// The protocol has not been started.
+    NotStarted,
+
+    /// The protocol has already been started.
+    AlreadyStarted,
+
+    /// The operation was aborted.
+    Aborted,
+
+    /// An ICMP error occurred during the network operation.
+    IcmpError,
+
+    /// A TFTP error occurred during the network operation.
+    TftpError,
+
+    /// A protocol error occurred during the network operation.
+    ProtocolError,
+
+    /// The function encountered an internal version that was incompatible with
+    /// a version requested by the caller.
+    IncompatibleVersion,
+
+    /// The function was not performed due to a security violation.
+    SecurityViolation,
+
+    /// A CRC error was detected.
+    CrcError,
+
+    /// Beginning or end of media was reached.
+    EndOfMedia,
+
+    /// The end of the file was reached.
+    EndOfFile,
+
+    /// The language specified was invalid.
+    InvalidLanguage,
+
+    /// The security status of the data is unknown or compromised and the data
+    /// must be updated or replaced to restore a valid security status.
+    CompromisedData,
+
+    /// There is an IP address conflict.
+    IpAddressConflict,
+
+    /// A HTTP error occurred during the network operation.
+    HttpError,
+
+    /// Unknown `EFI_STATUS` error code.
+    Unknown(usize),
+}
+
+impl TryFrom<usize> for StatusError {
+    type Error = Error;
+
+    fn try_from(status: usize) -> Result<Self, Self::Error> {
+        // Code 0 is reserved for success and errors must have the highest bit
+        // set.
+        if status == 0 || status >> (usize::BITS - 1) == 0 {
+            return Err(Error::InvalidStatusConversion);
+        }
+
+        let error = match status & (usize::MAX >> 1) {
+            1 => StatusError::LoadError,
+            2 => StatusError::InvalidParameter,
+            3 => StatusError::Unsupported,
+            4 => StatusError::BadBufferSize,
+            5 => StatusError::BufferTooSmall,
+            6 => StatusError::NotReady,
+            7 => StatusError::DeviceError,
+            8 => StatusError::WriteProtected,
+            9 => StatusError::OutOfResources,
+            10 => StatusError::VolumeCorrupted,
+            11 => StatusError::VolumeFull,
+            12 => StatusError::NoMedia,
+            13 => StatusError::MediaChanged,
+            14 => StatusError::NotFound,
+            15 => StatusError::ACcessDenied,
+            16 => StatusError::NoResponse,
+            17 => StatusError::NoMapping,
+            18 => StatusError::Timeout,
+            19 => StatusError::NotStarted,
+            20 => StatusError::AlreadyStarted,
+            21 => StatusError::Aborted,
+            22 => StatusError::IcmpError,
+            23 => StatusError::TftpError,
+            24 => StatusError::ProtocolError,
+            25 => StatusError::IncompatibleVersion,
+            26 => StatusError::SecurityViolation,
+            27 => StatusError::CrcError,
+            28 => StatusError::EndOfMedia,
+            31 => StatusError::EndOfFile,
+            32 => StatusError::InvalidLanguage,
+            33 => StatusError::CompromisedData,
+            34 => StatusError::IpAddressConflict,
+            35 => StatusError::HttpError,
+            _ => StatusError::Unknown(status),
+        };
+
+        Ok(error)
+    }
+}
+
+/// The `EFI_STATUS` type of the UEFI specification.
+#[derive(Debug)]
+#[repr(transparent)]
+struct EfiStatus(usize);
+
+impl From<EfiStatus> for Status {
+    fn from(status: EfiStatus) -> Self {
+        if status.0 == 0 {
+            Status::Success
+        } else if status.0 >> (usize::BITS - 1) == 0 {
+            Status::Warning(status.0.try_into().unwrap())
+        } else {
+            Status::Error(status.0.try_into().unwrap())
+        }
+    }
 }
 
 /// Represents an UEFI handle.
@@ -104,10 +355,9 @@ impl SystemTable {
     ///
     /// The System Table is created using a raw pointer. Thus, this function is
     /// considered to be unsafe.
-    pub unsafe fn new(ptr: *const EfiSystemTable) -> Result<SystemTable, Error> {
+    pub unsafe fn new(ptr: *const EfiSystemTable) -> Result<Self, Error> {
         // Check table's signature.
-        if (*ptr).hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE
-        {
+        if (*ptr).hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE {
             return Err(Error::InvalidSignature);
         }
 
@@ -179,7 +429,7 @@ pub struct EfiBootServices {
     exit_boot_services: Ptr,
 
     // Miscelaneous services.
-    get_next_monotonic_count: extern "C" fn(*mut u64) -> u32,
+    get_next_monotonic_count: extern "C" fn(*mut u64) -> EfiStatus,
     stall: Ptr,
     set_watchdog_timer: Ptr,
 
@@ -226,7 +476,7 @@ impl BootServices {
     ///
     /// The Boot Services Table is created using a raw pointer. Thus, this
     /// function is considered to be unsafe.
-    pub unsafe fn new(ptr: *const EfiBootServices) -> Result<BootServices, Error> {
+    pub unsafe fn new(ptr: *const EfiBootServices) -> Result<Self, Error> {
         // Check table's signature.
         if (*ptr).hdr.signature != EFI_BOOT_SERVICES_SIGNATURE {
             return Err(Error::InvalidSignature);
@@ -249,12 +499,14 @@ impl BootServices {
     ///
     /// The function can return an error if the device is not functioning
     /// properly.
-    pub fn get_next_monotonic_count(&self) -> Result<u64, Error> {
+    pub fn get_next_monotonic_count(&self) -> Result<(u64, Status), Error> {
         let mut count = 0u64;
         let f = unsafe { (*self.ptr).get_next_monotonic_count };
-        match f(&mut count) {
-            0 => Ok(count),
-            ret => Err(Error::Unknown(ret)),
+        let status = f(&mut count);
+        match status.into() {
+            status @ Status::Success => Ok((count, status)),
+            status @ Status::Warning(_) => Ok((count, status)),
+            status @ Status::Error(_) => Err(Error::StatusError(status)),
         }
     }
 }

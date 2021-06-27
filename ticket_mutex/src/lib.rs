@@ -15,7 +15,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 /// Represents a mutex based on a Ticket Lock.
 pub struct TicketMutex<T> {
-    /// Next ticket
+    /// Next ticket.
     next_ticket: AtomicUsize,
 
     /// Ticket being served.

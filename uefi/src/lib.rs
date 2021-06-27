@@ -33,17 +33,8 @@ impl Deref for Handle {
 }
 
 /// Represents a generic pointer.
-#[derive(Debug)]
 #[repr(transparent)]
-pub struct Ptr(usize);
-
-impl Deref for Ptr {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+struct Ptr(usize);
 
 /// The `EFI_GUID` type of the UEFI specification.
 #[repr(C)]
@@ -69,7 +60,7 @@ const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
 
 /// The `EFI_SYSTEM_TABLE` type of the UEFI specification.
 #[repr(C)]
-struct EfiSystemTable {
+pub struct EfiSystemTable {
     hdr: EfiTableHeader,
     firmware_vendor: Ptr,
     firmware_revision: u32,
@@ -86,7 +77,7 @@ struct EfiSystemTable {
 }
 
 /// Represents the EFI System Table. It provides access to the boot and runtime
-/// Services.
+/// services.
 pub struct SystemTable {
     ptr: *const EfiSystemTable,
 }
@@ -98,7 +89,7 @@ impl SystemTable {
     /// ```ignore
     /// extern "C" fn efi_main(
     ///     image_handler: uefi::Handle,
-    ///     system_table: uefi::Ptr,
+    ///     system_table: *const uefi::EfiSystemTable,
     /// ) -> ! {
     ///     // ...
     /// }
@@ -111,31 +102,27 @@ impl SystemTable {
     ///
     /// # Safety
     ///
-    /// The system table is created using an arbitry pointer. Thus, this
-    /// function is considered to be unsafe.
-    pub unsafe fn new(ptr: Ptr) -> Result<SystemTable, Error> {
-        let efi_system_table_ptr = *ptr as *const EfiSystemTable;
-
+    /// The System Table is created using a raw pointer. Thus, this function is
+    /// considered to be unsafe.
+    pub unsafe fn new(ptr: *const EfiSystemTable) -> Result<SystemTable, Error> {
         // Check table's signature.
-        if (*efi_system_table_ptr).hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE
+        if (*ptr).hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE
         {
             return Err(Error::InvalidSignature);
         }
 
         // Check table's CRC32.
-        let mut system_table = core::ptr::read_unaligned(efi_system_table_ptr);
+        let mut system_table = core::ptr::read_unaligned(ptr);
         system_table.hdr.crc32 = 0;
         let crc32 = utils::crc32_for_value(system_table);
-        if crc32 != (*efi_system_table_ptr).hdr.crc32 {
+        if crc32 != (*ptr).hdr.crc32 {
             return Err(Error::InvalidCheckSum);
         }
 
-        Ok(SystemTable {
-            ptr: efi_system_table_ptr,
-        })
+        Ok(SystemTable { ptr })
     }
 
-    /// Returns the Boot Services.
+    /// Returns the boot services.
     pub fn boot_services(&self) -> Result<BootServices, Error> {
         let efi_boot_services_ptr = unsafe { (*self.ptr).boot_services };
 
@@ -146,12 +133,12 @@ impl SystemTable {
     }
 }
 
-/// The signature of an EFI Boot Services table.
+/// The signature of an EFI Boot Services Table.
 const EFI_BOOT_SERVICES_SIGNATURE: u64 = 0x56524553544f4f42;
 
 /// The `EFI_BOOT_SERVICES` type of the UEFI specification.
 #[repr(C)]
-struct EfiBootServices {
+pub struct EfiBootServices {
     hdr: EfiTableHeader,
 
     // Task priority services.
@@ -221,7 +208,7 @@ struct EfiBootServices {
     create_event_ex: Ptr,
 }
 
-/// Represents the EFI Boot Services table. It provides access to the boot
+/// Represents the EFI Boot Services Table. It provides access to the boot
 /// services.
 pub struct BootServices {
     ptr: *const EfiBootServices,
@@ -237,9 +224,9 @@ impl BootServices {
     ///
     /// # Safety
     ///
-    /// The boot services table is created using an arbitry pointer. Thus, this
+    /// The Boot Services Table is created using a raw pointer. Thus, this
     /// function is considered to be unsafe.
-    unsafe fn new(ptr: *const EfiBootServices) -> Result<BootServices, Error> {
+    pub unsafe fn new(ptr: *const EfiBootServices) -> Result<BootServices, Error> {
         // Check table's signature.
         if (*ptr).hdr.signature != EFI_BOOT_SERVICES_SIGNATURE {
             return Err(Error::InvalidSignature);
@@ -256,7 +243,12 @@ impl BootServices {
         Ok(BootServices { ptr })
     }
 
-    /// TODO(rm): Example function.
+    /// Returns a monotonically increasing count for the platform.
+    ///
+    /// # Errors
+    ///
+    /// The function can return an error if the device is not functioning
+    /// properly.
     pub fn get_next_monotonic_count(&self) -> Result<u64, Error> {
         let mut count = 0u64;
         let f = unsafe { (*self.ptr).get_next_monotonic_count };

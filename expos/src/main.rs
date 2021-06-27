@@ -11,7 +11,7 @@ mod serial;
 #[no_mangle]
 extern "C" fn efi_main(
     image_handler: uefi::Handle,
-    system_table_ptr: uefi::Ptr,
+    system_table_ptr: *const uefi::EfiSystemTable,
 ) -> ! {
     // Initialize serial.
     serial::init_serial();

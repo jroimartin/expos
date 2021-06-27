@@ -1,6 +1,6 @@
 //! Helpers needed for parsing UEFI structures.
 
-/// Builds a lookup table for the standard CCITT32 CRC algorithm using a seed
+/// Builds a lookup table for the standard CRC32 algorithm using a seed
 /// polynomial value of 0x04c11db7.
 fn build_crc32_table() -> [u32; 256] {
     const BIT_REFLECTED_SEED: u32 = 0x04c11db7u32.reverse_bits();
@@ -21,7 +21,7 @@ fn build_crc32_table() -> [u32; 256] {
     table
 }
 
-/// Returns the CCITT32 CRC checksum of the provided buffer.
+/// Returns the CRC32 checksum of the provided buffer.
 pub fn crc32<R: AsRef<[u8]>>(buf: R) -> u32 {
     let table = build_crc32_table();
 
@@ -35,7 +35,7 @@ pub fn crc32<R: AsRef<[u8]>>(buf: R) -> u32 {
     crc ^ 0xffffffff
 }
 
-/// Returns the CCITT32 CRC checksum of the provided value.
+/// Returns the CRC32 checksum of the provided value.
 pub unsafe fn crc32_for_value<T>(value: T) -> u32 {
     let ptr = &value as *const T as *const u8;
     let len = core::mem::size_of::<T>();

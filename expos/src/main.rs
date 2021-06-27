@@ -10,14 +10,19 @@ mod serial;
 /// UEFI entry point.
 #[no_mangle]
 extern "C" fn efi_main(
-    image_handler: uefi::EfiHandle,
-    system_table: *mut uefi::EfiSystemTable,
+    image_handler: uefi::Handle,
+    system_table_ptr: uefi::Ptr,
 ) -> ! {
     // Initialize serial.
     serial::init_serial();
 
+    let system_table =
+        unsafe { uefi::SystemTable::new(system_table_ptr).unwrap() };
+    let boot_services = system_table.boot_services().unwrap();
+
     println!("image_handler: {:#x?}", image_handler);
-    unsafe { println!("system_table: {:#x?}", *system_table) };
+    println!("count: {:?}", boot_services.get_next_monotonic_count());
+    println!("count: {:?}", boot_services.get_next_monotonic_count());
 
     panic!("end");
 }

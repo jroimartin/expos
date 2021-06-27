@@ -1,9 +1,9 @@
 //! Mutex based on the Ticket Lock spin lock described in [Algorithms for
 //! Scalable Synchronization on Shared-Memory Multiprocessors][ref].
 //!
-//! In our implementation we are using `Ordering::SeqCst` for all the atomic
-//! operations. This has performance implications under some circumstances, but
-//! that is not a real issue for us and we prefer to prioritize correctness.
+//! This implementation uses `Ordering::SeqCsts` for all the atomic operations.
+//! This has performance implications under some circumstances, but correctness
+//! has been put fist.
 //!
 //! [ref]: http://web.mit.edu/6.173/www/currentsemester/readings/R06-scalable-synchronization-1991.pdf
 

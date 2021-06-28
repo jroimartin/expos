@@ -60,17 +60,17 @@ pub enum StatusWarning {
     Unknown(usize),
 }
 
-impl TryFrom<usize> for StatusWarning {
+impl TryFrom<EfiStatus> for StatusWarning {
     type Error = Error;
 
-    fn try_from(status: usize) -> Result<Self, Self::Error> {
+    fn try_from(status: EfiStatus) -> Result<Self, Self::Error> {
         // Code 0 is reserved for success and warnings must have the highest
         // bit clear.
-        if status == 0 || status >> (usize::BITS - 1) == 1 {
+        if status.0 == 0 || status.0 >> (usize::BITS - 1) == 1 {
             return Err(Error::InvalidStatusConversion);
         }
 
-        match status {
+        match status.0 {
             1 => Ok(StatusWarning::UnknownGlyph),
             2 => Ok(StatusWarning::DeleteFailure),
             3 => Ok(StatusWarning::WriteFailure),
@@ -78,7 +78,7 @@ impl TryFrom<usize> for StatusWarning {
             5 => Ok(StatusWarning::StaleData),
             6 => Ok(StatusWarning::FileSystem),
             7 => Ok(StatusWarning::ResetRequired),
-            _ => Ok(StatusWarning::Unknown(status)),
+            code => Ok(StatusWarning::Unknown(code)),
         }
     }
 }
@@ -132,7 +132,7 @@ pub enum StatusError {
     NotFound,
 
     /// Access was denied.
-    ACcessDenied,
+    AccessDenied,
 
     /// The server was not found or did not respond to the request.
     NoResponse,
@@ -194,17 +194,17 @@ pub enum StatusError {
     Unknown(usize),
 }
 
-impl TryFrom<usize> for StatusError {
+impl TryFrom<EfiStatus> for StatusError {
     type Error = Error;
 
-    fn try_from(status: usize) -> Result<Self, Self::Error> {
+    fn try_from(status: EfiStatus) -> Result<Self, Self::Error> {
         // Code 0 is reserved for success and errors must have the highest bit
         // set.
-        if status == 0 || status >> (usize::BITS - 1) == 0 {
+        if status.0 == 0 || status.0 >> (usize::BITS - 1) == 0 {
             return Err(Error::InvalidStatusConversion);
         }
 
-        let error = match status & (usize::MAX >> 1) {
+        let error = match status.0 & (usize::MAX >> 1) {
             1 => StatusError::LoadError,
             2 => StatusError::InvalidParameter,
             3 => StatusError::Unsupported,
@@ -219,7 +219,7 @@ impl TryFrom<usize> for StatusError {
             12 => StatusError::NoMedia,
             13 => StatusError::MediaChanged,
             14 => StatusError::NotFound,
-            15 => StatusError::ACcessDenied,
+            15 => StatusError::AccessDenied,
             16 => StatusError::NoResponse,
             17 => StatusError::NoMapping,
             18 => StatusError::Timeout,
@@ -238,7 +238,7 @@ impl TryFrom<usize> for StatusError {
             33 => StatusError::CompromisedData,
             34 => StatusError::IpAddressConflict,
             35 => StatusError::HttpError,
-            _ => StatusError::Unknown(status),
+            _ => StatusError::Unknown(status.0),
         };
 
         Ok(error)
@@ -263,9 +263,9 @@ impl From<EfiStatus> for Status {
         if status.0 == 0 {
             Status::Success
         } else if status.0 >> (usize::BITS - 1) == 0 {
-            Status::Warning(status.0.try_into().unwrap())
+            Status::Warning(status.try_into().unwrap())
         } else {
-            Status::Error(status.0.try_into().unwrap())
+            Status::Error(status.try_into().unwrap())
         }
     }
 }
@@ -292,7 +292,8 @@ impl<T> From<(T, Status)> for StatusResult<T> {
     }
 }
 
-/// Represents an UEFI handle.
+/// Represents an UEFI handle. It is equivalent to the `EFI_HANDLE` type of the
+/// UEFI specification.
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Handle(usize);
@@ -307,16 +308,7 @@ impl Deref for Handle {
 
 /// Represents a generic pointer.
 #[repr(transparent)]
-struct Ptr(usize);
-
-/// The `EFI_GUID` type of the UEFI specification.
-#[repr(C)]
-struct EfiGuid {
-    data1: u32,
-    data2: u16,
-    data3: u16,
-    data4: [u8; 8],
-}
+struct EfiPtr(usize);
 
 /// The `EFI_TABLE_HEADER` type of the UEFI specification.
 #[repr(C)]
@@ -335,18 +327,18 @@ const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
 #[repr(C)]
 pub struct EfiSystemTable {
     hdr: EfiTableHeader,
-    firmware_vendor: Ptr,
+    firmware_vendor: EfiPtr,
     firmware_revision: u32,
     console_in_handle: Handle,
-    cons_in: Ptr,
+    cons_in: EfiPtr,
     console_out_handle: Handle,
-    cons_out: Ptr,
+    cons_out: EfiPtr,
     standard_error_handle: Handle,
-    std_err: Ptr,
-    runtime_services: Ptr,
+    std_err: EfiPtr,
+    runtime_services: EfiPtr,
     boot_services: *const EfiBootServices,
     number_of_table_entries: usize,
-    configuration_table: Ptr,
+    configuration_table: EfiPtr,
 }
 
 /// Represents the EFI System Table. It provides access to the boot and runtime
@@ -405,8 +397,185 @@ impl SystemTable {
     }
 }
 
+/// Represents a physical memory address. It is equivalent to the
+/// `EFI_PHYSICAL_ADDRESS` type of the UEFI specification.
+#[derive(Debug, Copy, Clone)]
+#[repr(transparent)]
+pub struct PhysAddr(u64);
+
+impl Deref for PhysAddr {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Represents a virtual memory address. It is equivalent to the
+/// `EFI_VIRTUAL_ADDRESS` type of the UEFI specification.
+#[derive(Debug, Copy, Clone)]
+#[repr(transparent)]
+pub struct VirtAddr(u64);
+
+impl Deref for VirtAddr {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// The `EFI_MEMORY_TYPE` type of the UEFI specification.
+#[repr(transparent)]
+struct EfiMemoryType(u32);
+
+/// The type of memory.
+#[derive(Debug, Copy, Clone)]
+pub enum MemoryType {
+    /// Not usable memory.
+    ReservedMemoryType,
+
+    /// The UEFI OS Loader and/or OS may use this memory as they see fit.
+    LoaderCode,
+
+    /// The UEFI OS Loader and/or OS may use this memory as they see fit.
+    LoaderData,
+
+    /// Memory available for general use.
+    BootServicesCode,
+
+    /// Memory available for general use.
+    BootServicesData,
+
+    /// The memory in this range is to be preserved by the UEFI OS loader and
+    /// OS in the working and ACPI S1-S3 states.
+    RuntimeServicesCode,
+
+    /// The memory in this range is to be preserved by the UEFI OS loader and
+    /// OS in the working and ACPI S1-S3 states.
+    RuntimeServicesData,
+
+    /// Memory available for general use.
+    ConventionalMemory,
+
+    /// Memory that contains errors and is not to be used.
+    UnusableMemory,
+
+    /// This memory is to be preserved by the UEFI OS loader and OS until ACPI
+    /// is enabled. Once ACPI is enabled, the memory in this range is available
+    /// for general use.
+    ACPIReclaimMemory,
+
+    /// This memory is to be preserved by the UEFI OS loader and OS in the
+    /// working and ACPI S1-S3 states.
+    ACPIMemoryNVS,
+
+    /// This memory is not used by the OS. All system memory-mapped IO
+    /// information should come from ACPI tables.
+    MemoryMappedIO,
+
+    /// This memory is not used by the OS. All system memory-mapped IO port
+    /// space information should come from ACPI tables.
+    MemoryMappedIOPortSpace,
+
+    /// This memory is to be preserved by the UEFI OS loader and OS in the
+    /// working and ACPI S1-S4 states. This memory may also have other
+    /// attributes that are defined by the processor implementation.
+    PalCode,
+
+    /// A memory region that operates as `ConventionalMemory`. However, it
+    /// happens to also support byte-addressable non-volatility.
+    PersistentMemory,
+
+    /// A memory region that represents unaccepted memory, that must be
+    /// accepted by the boot target before it can be used. Unless otherwise
+    /// noted, all other EFI memory types are accepted. For platforms that
+    /// support unaccepted memory, all unaccepted valid memory will be reported
+    /// as unaccepted in the memory map. Unreported physical address ranges
+    /// must be treated as not-present memory.
+    UnacceptedMemoryType,
+
+    /// Unknown memory type.
+    Unknown(u32),
+}
+
+impl From<EfiMemoryType> for MemoryType {
+    fn from(mem_type: EfiMemoryType) -> Self {
+        match mem_type.0 {
+            0 => MemoryType::ReservedMemoryType,
+            1 => MemoryType::LoaderCode,
+            2 => MemoryType::LoaderData,
+            3 => MemoryType::BootServicesCode,
+            4 => MemoryType::BootServicesData,
+            5 => MemoryType::RuntimeServicesCode,
+            6 => MemoryType::RuntimeServicesData,
+            7 => MemoryType::ConventionalMemory,
+            8 => MemoryType::UnusableMemory,
+            9 => MemoryType::ACPIReclaimMemory,
+            10 => MemoryType::ACPIMemoryNVS,
+            11 => MemoryType::MemoryMappedIO,
+            12 => MemoryType::MemoryMappedIOPortSpace,
+            13 => MemoryType::PalCode,
+            14 => MemoryType::PersistentMemory,
+            15 => MemoryType::UnacceptedMemoryType,
+            ty => MemoryType::Unknown(ty),
+        }
+    }
+}
+
+/// The `EFI_MEMORY_DESCRIPTOR` type of the UEFI specification.
+#[repr(C)]
+struct EfiMemoryDescriptor {
+    memory_type: EfiMemoryType,
+    physical_start: PhysAddr,
+    virtual_start: VirtAddr,
+    number_of_pages: u64,
+    attribute: u64,
+}
+
+/// Describes a contiguous block of memory.
+#[derive(Debug, Copy, Clone)]
+pub struct MemoryDescriptor {
+    memory_type: MemoryType,
+    physical_start: PhysAddr,
+    virtual_start: VirtAddr,
+    number_of_pages: u64,
+    attribute: u64,
+}
+
+impl From<EfiMemoryDescriptor> for MemoryDescriptor {
+    fn from(mem_desc: EfiMemoryDescriptor) -> Self {
+        MemoryDescriptor {
+            memory_type: mem_desc.memory_type.into(),
+            physical_start: mem_desc.physical_start,
+            virtual_start: mem_desc.virtual_start,
+            number_of_pages: mem_desc.number_of_pages,
+            attribute: mem_desc.attribute,
+        }
+    }
+}
+
+/// The `EFI_GUID` type of the UEFI specification.
+#[repr(C)]
+struct EfiGuid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+/// The `EFI_CONFIGURATION_TABLE` type of the UEFI specification.
+#[repr(C)]
+struct EfiConfigurationTable {
+    vendor_guid: EfiGuid,
+    vendor_table: EfiPtr,
+}
+
 /// The signature of an EFI Boot Services Table.
 const EFI_BOOT_SERVICES_SIGNATURE: u64 = 0x56524553544f4f42;
+
+/// Fixed length of the memory map.
+const MEMORY_MAP_LEN: usize = 128;
 
 /// The `EFI_BOOT_SERVICES` type of the UEFI specification.
 #[repr(C)]
@@ -414,70 +583,76 @@ pub struct EfiBootServices {
     hdr: EfiTableHeader,
 
     // Task priority services.
-    raise_tpl: Ptr,
-    restore_tpl: Ptr,
+    raise_tpl: EfiPtr,
+    restore_tpl: EfiPtr,
 
     // Memory services.
-    allocate_pages: Ptr,
-    free_pages: Ptr,
-    get_memory_map: Ptr,
-    allocate_pool: Ptr,
-    free_pool: Ptr,
+    allocate_pages: EfiPtr,
+    free_pages: EfiPtr,
+    get_memory_map: extern "C" fn(
+        *mut usize,
+        *mut u8,
+        *mut usize,
+        *mut usize,
+        *mut u32,
+    ) -> EfiStatus,
+    allocate_pool: EfiPtr,
+    free_pool: EfiPtr,
 
     // Event & timer services.
-    create_event: Ptr,
-    set_timer: Ptr,
-    wait_for_event: Ptr,
-    signal_event: Ptr,
-    close_event: Ptr,
-    check_event: Ptr,
+    create_event: EfiPtr,
+    set_timer: EfiPtr,
+    wait_for_event: EfiPtr,
+    signal_event: EfiPtr,
+    close_event: EfiPtr,
+    check_event: EfiPtr,
 
     // Protocol handler services.
-    install_protocol_interface: Ptr,
-    reinstall_protocol_interface: Ptr,
-    uninstall_protocol_interface: Ptr,
-    handle_protocol: Ptr,
-    reserved: Ptr,
-    register_protocol_notify: Ptr,
-    locate_handle: Ptr,
-    locate_device_path: Ptr,
-    install_configuration_table: Ptr,
+    install_protocol_interface: EfiPtr,
+    reinstall_protocol_interface: EfiPtr,
+    uninstall_protocol_interface: EfiPtr,
+    handle_protocol: EfiPtr,
+    reserved: EfiPtr,
+    register_protocol_notify: EfiPtr,
+    locate_handle: EfiPtr,
+    locate_device_path: EfiPtr,
+    install_configuration_table: EfiPtr,
 
     // Image services.
-    load_image: Ptr,
-    start_image: Ptr,
-    exit: Ptr,
-    unload_image: Ptr,
-    exit_boot_services: Ptr,
+    load_image: EfiPtr,
+    start_image: EfiPtr,
+    exit: EfiPtr,
+    unload_image: EfiPtr,
+    exit_boot_services: EfiPtr,
 
     // Miscelaneous services.
     get_next_monotonic_count: extern "C" fn(*mut u64) -> EfiStatus,
-    stall: Ptr,
-    set_watchdog_timer: Ptr,
+    stall: EfiPtr,
+    set_watchdog_timer: EfiPtr,
 
     // DriverSupport services.
-    connect_controller: Ptr,
-    disconnect_controller: Ptr,
+    connect_controller: EfiPtr,
+    disconnect_controller: EfiPtr,
 
     // Open and close protocol services.
-    open_protocol: Ptr,
-    close_protocol: Ptr,
-    open_protocol_information: Ptr,
+    open_protocol: EfiPtr,
+    close_protocol: EfiPtr,
+    open_protocol_information: EfiPtr,
 
     // Library services.
-    protocols_per_handle: Ptr,
-    locate_handle_buffer: Ptr,
-    locate_protocol: Ptr,
-    install_multiple_protocol_interfaces: Ptr,
-    uninstall_multiple_protocol_interfaces: Ptr,
+    protocols_per_handle: EfiPtr,
+    locate_handle_buffer: EfiPtr,
+    locate_protocol: EfiPtr,
+    install_multiple_protocol_interfaces: EfiPtr,
+    uninstall_multiple_protocol_interfaces: EfiPtr,
 
     // 32-bit CRC services.
-    calculate_crc32: Ptr,
+    calculate_crc32: EfiPtr,
 
     // Miscelaneous services.
-    copy_mem: Ptr,
-    set_mem: Ptr,
-    create_event_ex: Ptr,
+    copy_mem: EfiPtr,
+    set_mem: EfiPtr,
+    create_event_ex: EfiPtr,
 }
 
 /// Represents the EFI Boot Services Table. It provides access to the boot
@@ -518,16 +693,58 @@ impl BootServices {
     /// Returns a monotonically increasing count for the platform.
     pub fn get_next_monotonic_count(&self) -> StatusResult<u64> {
         let mut count = 0u64;
-        let f = unsafe { (*self.ptr).get_next_monotonic_count };
-        let status = f(&mut count);
+        let service = unsafe { (*self.ptr).get_next_monotonic_count };
+        let status = service(&mut count);
 
         StatusResult::from((count, status.into()))
     }
-}
 
-/// The `EFI_CONFIGURATION_TABLE` type of the UEFI specification.
-#[repr(C)]
-struct EfiConfigurationTable {
-    vendor_guid: EfiGuid,
-    vendor_table: Ptr,
+    /// Returns the current memory map and its map key. The map is an array of
+    /// memory descriptors, each of which describes a contiguous block of
+    /// memory.
+    pub fn get_memory_map(
+        &self,
+    ) -> StatusResult<([Option<MemoryDescriptor>; MEMORY_MAP_LEN], usize)>
+    {
+        const BUFFER_SIZE: usize = 4096;
+
+        // Allocate the arguments of the boot service.
+        let mut memory_map_size = BUFFER_SIZE;
+        let mut memory_map = [0u8; BUFFER_SIZE];
+        let mut map_key = 0usize;
+        let mut descriptor_size = 0usize;
+        let mut descriptor_version = 0u32;
+
+        // Call the boot service.
+        let service = unsafe { (*self.ptr).get_memory_map };
+        let status = service(
+            &mut memory_map_size,
+            memory_map.as_mut_ptr(),
+            &mut map_key,
+            &mut descriptor_size,
+            &mut descriptor_version,
+        );
+
+        // Fill the array to be returned.
+        let mut ret = [None; MEMORY_MAP_LEN];
+        let mut idx = 0;
+        while (idx + 1) * descriptor_size <= memory_map_size {
+            if idx >= MEMORY_MAP_LEN {
+                return StatusResult::Err(StatusError::BufferTooSmall);
+            }
+
+            let descriptor = unsafe {
+                let descriptor_ptr =
+                    memory_map.as_ptr().add(idx * descriptor_size)
+                        as *const EfiMemoryDescriptor;
+                core::ptr::read(descriptor_ptr)
+            };
+
+            ret[idx] = Some(descriptor.into());
+
+            idx += 1;
+        }
+
+        StatusResult::from(((ret, map_key), status.into()))
+    }
 }

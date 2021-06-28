@@ -2,8 +2,8 @@
 
 #![no_std]
 
-use core::ops::Deref;
 use core::convert::{TryFrom, TryInto};
+use core::ops::Deref;
 
 mod utils;
 
@@ -20,21 +20,13 @@ pub enum Error {
     InvalidStatusConversion,
 
     /// The returned status code is an error.
-    StatusError(Status),
+    StatusError(StatusError),
 }
 
-/// Represents an UEFI status code.
+/// The `EFI_STATUS` type of the UEFI specification.
 #[derive(Debug)]
-pub enum Status {
-    /// Success status code.
-    Success,
-
-    /// Warning status code.
-    Warning(StatusWarning),
-
-    /// Error status code.
-    Error(StatusError),
-}
+#[repr(transparent)]
+struct EfiStatus(usize);
 
 /// Represents an UEFI warning status code.
 #[derive(Debug)]
@@ -253,10 +245,18 @@ impl TryFrom<usize> for StatusError {
     }
 }
 
-/// The `EFI_STATUS` type of the UEFI specification.
+/// Represents an UEFI status code.
 #[derive(Debug)]
-#[repr(transparent)]
-struct EfiStatus(usize);
+pub enum Status {
+    /// Success status code.
+    Success,
+
+    /// Warning status code.
+    Warning(StatusWarning),
+
+    /// Error status code.
+    Error(StatusError),
+}
 
 impl From<EfiStatus> for Status {
     fn from(status: EfiStatus) -> Self {
@@ -266,6 +266,28 @@ impl From<EfiStatus> for Status {
             Status::Warning(status.0.try_into().unwrap())
         } else {
             Status::Error(status.0.try_into().unwrap())
+        }
+    }
+}
+
+/// An UEFI operation will return one of the following status codes: Success,
+/// Warning and Error. This type represents them along with the returned result
+/// for operations finishing in Success or Warning.
+#[derive(Debug)]
+pub enum StatusResult<T> {
+    Ok(T),
+    Warn(T, StatusWarning),
+    Err(StatusError),
+}
+
+impl<T> From<(T, Status)> for StatusResult<T> {
+    fn from(result_status: (T, Status)) -> Self {
+        match result_status.1 {
+            Status::Success => StatusResult::Ok(result_status.0),
+            Status::Warning(status) => {
+                StatusResult::Warn(result_status.0, status)
+            }
+            Status::Error(status) => StatusResult::Err(status),
         }
     }
 }
@@ -494,20 +516,12 @@ impl BootServices {
     }
 
     /// Returns a monotonically increasing count for the platform.
-    ///
-    /// # Errors
-    ///
-    /// The function can return an error if the device is not functioning
-    /// properly.
-    pub fn get_next_monotonic_count(&self) -> Result<(u64, Status), Error> {
+    pub fn get_next_monotonic_count(&self) -> StatusResult<u64> {
         let mut count = 0u64;
         let f = unsafe { (*self.ptr).get_next_monotonic_count };
         let status = f(&mut count);
-        match status.into() {
-            status @ Status::Success => Ok((count, status)),
-            status @ Status::Warning(_) => Ok((count, status)),
-            status @ Status::Error(_) => Err(Error::StatusError(status)),
-        }
+
+        StatusResult::from((count, status.into()))
     }
 }
 

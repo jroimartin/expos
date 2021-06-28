@@ -21,8 +21,8 @@ extern "C" fn efi_main(
     let boot_services = system_table.boot_services().unwrap();
 
     println!("image_handler: {:#x?}", image_handler);
-    println!("count: {:?}", boot_services.get_next_monotonic_count());
-    println!("count: {:?}", boot_services.get_next_monotonic_count());
+    println!("count: {:#x?}", boot_services.get_next_monotonic_count());
+    println!("count: {:#x?}", boot_services.get_next_monotonic_count());
 
     panic!("end");
 }

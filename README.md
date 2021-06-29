@@ -11,7 +11,7 @@ variable must be set:
 RUSTFLAGS='-C link-arg=/debug:dwarf'
 ```
 
-So, we can use `cargo` this way:
+We would run `cargo` in the following way:
 
 ```
 RUSTFLAGS='-C link-arg=/debug:dwarf' cargo build

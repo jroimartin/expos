@@ -693,6 +693,7 @@ impl BootServices {
     /// Returns a monotonically increasing count for the platform.
     pub fn get_next_monotonic_count(&self) -> StatusResult<u64> {
         let mut count = 0u64;
+
         let service = unsafe { (*self.ptr).get_next_monotonic_count };
         let status = service(&mut count);
 

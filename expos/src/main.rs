@@ -10,7 +10,7 @@ mod serial;
 /// UEFI entry point.
 #[no_mangle]
 extern "C" fn efi_main(
-    image_handler: uefi::Handle,
+    image_handle: uefi::Handle,
     system_table_ptr: *const uefi::EfiSystemTable,
 ) -> ! {
     // Initialize serial.
@@ -20,16 +20,15 @@ extern "C" fn efi_main(
         unsafe { uefi::SystemTable::new(system_table_ptr).unwrap() };
     let boot_services = system_table.boot_services().unwrap();
 
-    println!("image_handler: {:#x?}", image_handler);
+    println!("image_handle: {:#x?}", image_handle);
+
+    let (memory_map, map_key) = boot_services.get_available_memory().unwrap();
+    println!("memory_map: {:#x?} {:#x}", memory_map.ranges(), map_key);
+    println!("available memory: {}", memory_map.size());
     println!(
-        "monotonic_count: {:#x?}",
-        boot_services.get_next_monotonic_count()
+        "exit_boot_services: {:?}",
+        boot_services.exit_boot_services(image_handle, map_key)
     );
-    println!(
-        "monotonic_count: {:#x?}",
-        boot_services.get_next_monotonic_count()
-    );
-    println!("memory_map: {:#x?}", boot_services.get_memory_map());
 
     panic!("end");
 }

@@ -2,6 +2,8 @@
 members = [
     "cpu",
     "expos",
+    "mm",
+    "range",
     "serial",
     "ticket_mutex",
     "uefi",

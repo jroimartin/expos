@@ -61,6 +61,8 @@ unsafe impl<T: Send> Sync for TicketMutex<T> {}
 ///
 /// This structure is created by the `lock` method on `TicketMutex`.
 pub struct TicketMutexGuard<'a, T> {
+    /// `TicketMutex` associated with this `TicketMutexGuard`. It is used to
+    /// provide access to the protected data.
     mutex: &'a TicketMutex<T>,
 }
 

@@ -5,6 +5,9 @@
 use core::convert::{TryFrom, TryInto};
 use core::ops::Deref;
 
+use mm::{PhysAddr, VirtAddr};
+use range::{Range, RangeSet};
+
 mod utils;
 
 /// Represents an UEFI error.
@@ -19,12 +22,26 @@ pub enum Error {
     /// Invalid status code conversion.
     InvalidStatusConversion,
 
-    /// The returned status code is an error.
+    /// The size of the memory address does not match the target architecture.
+    InvalidAddressSize,
+
+    /// The status code returned by an EFI interface is an error.
     StatusError(StatusError),
+
+    /// The status code returned by an EFI interface is a warning.
+    StatusWarning(StatusWarning),
+
+    /// Error related to a memory map operation.
+    RangeError(range::Error),
+}
+
+impl From<range::Error> for Error {
+    fn from(err: range::Error) -> Self {
+        Error::RangeError(err)
+    }
 }
 
 /// The `EFI_STATUS` type of the UEFI specification.
-#[derive(Debug)]
 #[repr(transparent)]
 struct EfiStatus(usize);
 
@@ -80,6 +97,12 @@ impl TryFrom<EfiStatus> for StatusWarning {
             7 => Ok(StatusWarning::ResetRequired),
             code => Ok(StatusWarning::Unknown(code)),
         }
+    }
+}
+
+impl From<StatusWarning> for Error {
+    fn from(warn: StatusWarning) -> Self {
+        Error::StatusWarning(warn)
     }
 }
 
@@ -245,9 +268,14 @@ impl TryFrom<EfiStatus> for StatusError {
     }
 }
 
-/// Represents an UEFI status code.
-#[derive(Debug)]
-pub enum Status {
+impl From<StatusError> for Error {
+    fn from(err: StatusError) -> Self {
+        Error::StatusError(err)
+    }
+}
+
+/// Represents the status code returned by an EFI interface.
+enum Status {
     /// Success status code.
     Success,
 
@@ -270,31 +298,9 @@ impl From<EfiStatus> for Status {
     }
 }
 
-/// An UEFI operation will return one of the following status codes: Success,
-/// Warning and Error. This type represents them along with the returned result
-/// for operations finishing in Success or Warning.
-#[derive(Debug)]
-pub enum StatusResult<T> {
-    Ok(T),
-    Warn(T, StatusWarning),
-    Err(StatusError),
-}
-
-impl<T> From<(T, Status)> for StatusResult<T> {
-    fn from(result_status: (T, Status)) -> Self {
-        match result_status.1 {
-            Status::Success => StatusResult::Ok(result_status.0),
-            Status::Warning(status) => {
-                StatusResult::Warn(result_status.0, status)
-            }
-            Status::Error(status) => StatusResult::Err(status),
-        }
-    }
-}
-
 /// Represents an UEFI handle. It is equivalent to the `EFI_HANDLE` type of the
 /// UEFI specification.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct Handle(usize);
 
@@ -307,10 +313,12 @@ impl Deref for Handle {
 }
 
 /// Represents a generic pointer.
+#[derive(Debug, Clone)]
 #[repr(transparent)]
 struct EfiPtr(usize);
 
 /// The `EFI_TABLE_HEADER` type of the UEFI specification.
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct EfiTableHeader {
     signature: u64,
@@ -324,6 +332,7 @@ struct EfiTableHeader {
 const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
 
 /// The `EFI_SYSTEM_TABLE` type of the UEFI specification.
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct EfiSystemTable {
     hdr: EfiTableHeader,
@@ -343,8 +352,10 @@ pub struct EfiSystemTable {
 
 /// Represents the EFI System Table. It provides access to the boot and runtime
 /// services.
+#[derive(Debug)]
 pub struct SystemTable {
-    ptr: *const EfiSystemTable,
+    /// The `EFI_SYSTEM_TABLE` structure provided by the firmware.
+    system_table: EfiSystemTable,
 }
 
 impl SystemTable {
@@ -370,58 +381,52 @@ impl SystemTable {
     /// The System Table is created using a raw pointer. Thus, this function is
     /// considered to be unsafe.
     pub unsafe fn new(ptr: *const EfiSystemTable) -> Result<Self, Error> {
+        let system_table = core::ptr::read_unaligned(ptr);
+
         // Check table's signature.
-        if (*ptr).hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE {
+        if system_table.hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE {
             return Err(Error::InvalidSignature);
         }
 
         // Check table's CRC32.
-        let mut system_table = core::ptr::read_unaligned(ptr);
-        system_table.hdr.crc32 = 0;
-        let crc32 = utils::crc32_for_value(system_table);
-        if crc32 != (*ptr).hdr.crc32 {
+        let mut system_table_crc32 = system_table.clone();
+        system_table_crc32.hdr.crc32 = 0;
+        let crc32 = utils::crc32_for_value(system_table_crc32);
+        if crc32 != system_table.hdr.crc32 {
             return Err(Error::InvalidCheckSum);
         }
 
-        Ok(SystemTable { ptr })
+        Ok(SystemTable { system_table })
     }
 
     /// Returns the boot services.
     pub fn boot_services(&self) -> Result<BootServices, Error> {
-        let efi_boot_services_ptr = unsafe { (*self.ptr).boot_services };
-
         // A `SystemTable` is only created after checking its signature
         // and CRC32. Thus, we assume the pointer to the Boot Services Table
         // will be valid.
-        unsafe { BootServices::new(efi_boot_services_ptr) }
+        unsafe { BootServices::new(self.system_table.boot_services) }
     }
 }
 
 /// Represents a physical memory address. It is equivalent to the
 /// `EFI_PHYSICAL_ADDRESS` type of the UEFI specification.
-#[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
-pub struct PhysAddr(u64);
+struct EfiPhysAddr(u64);
 
-impl Deref for PhysAddr {
-    type Target = u64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl From<EfiPhysAddr> for PhysAddr {
+    fn from(addr: EfiPhysAddr) -> Self {
+        PhysAddr::from(addr.0)
     }
 }
 
 /// Represents a virtual memory address. It is equivalent to the
 /// `EFI_VIRTUAL_ADDRESS` type of the UEFI specification.
-#[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
-pub struct VirtAddr(u64);
+pub struct EfiVirtAddr(u64);
 
-impl Deref for VirtAddr {
-    type Target = u64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl From<EfiVirtAddr> for VirtAddr {
+    fn from(addr: EfiVirtAddr) -> Self {
+        VirtAddr::from(addr.0)
     }
 }
 
@@ -430,61 +435,110 @@ impl Deref for VirtAddr {
 struct EfiMemoryType(u32);
 
 /// The type of memory.
-#[derive(Debug, Copy, Clone)]
-pub enum MemoryType {
+enum MemoryType {
     /// Not usable memory.
-    ReservedMemoryType,
+    ReservedMemory,
 
-    /// The UEFI OS Loader and/or OS may use this memory as they see fit.
+    /// The code portions of a loaded UEFI application.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, the UEFI OS
+    /// Loader and/or OS may use this memory as they see fit. However, the UEFI
+    /// OS loader that called `EFI_BOOT_SERVICES.ExitBootServices()` is
+    /// utilizing one or more of these ranges.
     LoaderCode,
 
-    /// The UEFI OS Loader and/or OS may use this memory as they see fit.
+    /// The data portions of a loaded UEFI application and the default data
+    /// allocation type used by a UEFI application to allocate pool memory.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, the UEFI OS
+    /// Loader and/or OS may use this memory as they see fit. However, the UEFI
+    /// OS loader that called `EFI_BOOT_SERVICES.ExitBootServices()` is
+    /// utilizing one or more of these ranges.
     LoaderData,
 
-    /// Memory available for general use.
+    /// The code portions of a loaded UEFI Boot Service Driver.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory s
+    /// available for general use.
     BootServicesCode,
 
-    /// Memory available for general use.
+    /// The data portions of a loaded UEFI Boot Serve Driver, and the default
+    /// data allocation type used by a UEFI Boot Service Driver to allocate
+    /// pool memory.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is
+    /// available for general use.
     BootServicesData,
 
-    /// The memory in this range is to be preserved by the UEFI OS loader and
-    /// OS in the working and ACPI S1-S3 states.
+    /// The code portions of a loaded UEFI Runtime Driver.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, the memory in
+    /// this range is to be preserved by the UEFI OS loader and OS in the
+    /// working and ACPI S1-S3 states.
     RuntimeServicesCode,
 
-    /// The memory in this range is to be preserved by the UEFI OS loader and
-    /// OS in the working and ACPI S1-S3 states.
+    /// The data portions of a loaded UEFI Runtime Driver and the default data
+    /// allocation type used by a UEFI Runtime Driver to allocate pool memory.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, the memory in
+    /// this range is to be preserved by the UEFI OS loader and OS in the
+    /// working and ACPI S1-S3 states.
     RuntimeServicesData,
 
-    /// Memory available for general use.
+    /// Free (unallocated) memory.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is
+    /// available for general use.
     ConventionalMemory,
 
-    /// Memory that contains errors and is not to be used.
+    /// Memory in which errors have been detected.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is
+    /// not to be used.
     UnusableMemory,
 
-    /// This memory is to be preserved by the UEFI OS loader and OS until ACPI
-    /// is enabled. Once ACPI is enabled, the memory in this range is available
-    /// for general use.
+    /// Memory that holds the ACPI tables.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is to
+    /// be preserved by the UEFI OS loader and OS until ACPI is enabled. Once
+    /// ACPI is enabled, the memory in this range is available for general use.
     ACPIReclaimMemory,
 
-    /// This memory is to be preserved by the UEFI OS loader and OS in the
-    /// working and ACPI S1-S3 states.
+    /// Address space reserved for use by the firmware.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is to
+    /// be preserved by the UEFI OS loader and OS in the working and ACPI S1-S3
+    /// states.
     ACPIMemoryNVS,
 
-    /// This memory is not used by the OS. All system memory-mapped IO
-    /// information should come from ACPI tables.
+    /// Used by system firmware to request that a memory-mapped IO region be
+    /// mapped by the OS to a virtual address so it can be accessed by EFI
+    /// runtime services.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is
+    /// not used by the OS. All system memory-mapped IO information should come
+    /// from ACPI tables.
     MemoryMappedIO,
 
-    /// This memory is not used by the OS. All system memory-mapped IO port
-    /// space information should come from ACPI tables.
+    /// System memory-mapped IO region that is used to translate memory cycles
+    /// to IO cycles by the processor.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is
+    /// not used by the OS. All system memory-mapped IO port space information
+    /// should come from ACPI tables.
     MemoryMappedIOPortSpace,
 
-    /// This memory is to be preserved by the UEFI OS loader and OS in the
-    /// working and ACPI S1-S4 states. This memory may also have other
-    /// attributes that are defined by the processor implementation.
+    /// Address space reserved by the firmware for code that is part of the
+    /// processor.
+    ///
+    /// After calling `EFI_BOOT_SERVICES.ExitBootServices()`, this memory is to
+    /// be preserved by the UEFI OS loader and OS in the working and ACPI S1-S4
+    /// states. This memory may also have other attributes that are defined by
+    /// the processor implementation.
     PalCode,
 
-    /// A memory region that operates as `ConventionalMemory`. However, it
-    /// happens to also support byte-addressable non-volatility.
+    /// A memory region that operates as `MemoryType::ConventionalMemory`.
+    /// However, it happens to also support byte-addressable non-volatility.
     PersistentMemory,
 
     /// A memory region that represents unaccepted memory, that must be
@@ -493,7 +547,7 @@ pub enum MemoryType {
     /// support unaccepted memory, all unaccepted valid memory will be reported
     /// as unaccepted in the memory map. Unreported physical address ranges
     /// must be treated as not-present memory.
-    UnacceptedMemoryType,
+    UnacceptedMemory,
 
     /// Unknown memory type.
     Unknown(u32),
@@ -502,7 +556,7 @@ pub enum MemoryType {
 impl From<EfiMemoryType> for MemoryType {
     fn from(mem_type: EfiMemoryType) -> Self {
         match mem_type.0 {
-            0 => MemoryType::ReservedMemoryType,
+            0 => MemoryType::ReservedMemory,
             1 => MemoryType::LoaderCode,
             2 => MemoryType::LoaderData,
             3 => MemoryType::BootServicesCode,
@@ -517,7 +571,7 @@ impl From<EfiMemoryType> for MemoryType {
             12 => MemoryType::MemoryMappedIOPortSpace,
             13 => MemoryType::PalCode,
             14 => MemoryType::PersistentMemory,
-            15 => MemoryType::UnacceptedMemoryType,
+            15 => MemoryType::UnacceptedMemory,
             ty => MemoryType::Unknown(ty),
         }
     }
@@ -527,57 +581,17 @@ impl From<EfiMemoryType> for MemoryType {
 #[repr(C)]
 struct EfiMemoryDescriptor {
     memory_type: EfiMemoryType,
-    physical_start: PhysAddr,
-    virtual_start: VirtAddr,
+    physical_start: EfiPhysAddr,
+    virtual_start: EfiVirtAddr,
     number_of_pages: u64,
     attribute: u64,
-}
-
-/// Describes a contiguous block of memory.
-#[derive(Debug, Copy, Clone)]
-pub struct MemoryDescriptor {
-    memory_type: MemoryType,
-    physical_start: PhysAddr,
-    virtual_start: VirtAddr,
-    number_of_pages: u64,
-    attribute: u64,
-}
-
-impl From<EfiMemoryDescriptor> for MemoryDescriptor {
-    fn from(mem_desc: EfiMemoryDescriptor) -> Self {
-        MemoryDescriptor {
-            memory_type: mem_desc.memory_type.into(),
-            physical_start: mem_desc.physical_start,
-            virtual_start: mem_desc.virtual_start,
-            number_of_pages: mem_desc.number_of_pages,
-            attribute: mem_desc.attribute,
-        }
-    }
-}
-
-/// The `EFI_GUID` type of the UEFI specification.
-#[repr(C)]
-struct EfiGuid {
-    data1: u32,
-    data2: u16,
-    data3: u16,
-    data4: [u8; 8],
-}
-
-/// The `EFI_CONFIGURATION_TABLE` type of the UEFI specification.
-#[repr(C)]
-struct EfiConfigurationTable {
-    vendor_guid: EfiGuid,
-    vendor_table: EfiPtr,
 }
 
 /// The signature of an EFI Boot Services Table.
 const EFI_BOOT_SERVICES_SIGNATURE: u64 = 0x56524553544f4f42;
 
-/// Fixed length of the memory map.
-const MEMORY_MAP_LEN: usize = 128;
-
 /// The `EFI_BOOT_SERVICES` type of the UEFI specification.
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct EfiBootServices {
     hdr: EfiTableHeader,
@@ -623,10 +637,11 @@ pub struct EfiBootServices {
     start_image: EfiPtr,
     exit: EfiPtr,
     unload_image: EfiPtr,
-    exit_boot_services: EfiPtr,
+    exit_boot_services:
+        extern "C" fn(image_handle: Handle, map_key: usize) -> EfiStatus,
 
     // Miscelaneous services.
-    get_next_monotonic_count: extern "C" fn(*mut u64) -> EfiStatus,
+    get_next_monotonic_count: EfiPtr,
     stall: EfiPtr,
     set_watchdog_timer: EfiPtr,
 
@@ -657,8 +672,10 @@ pub struct EfiBootServices {
 
 /// Represents the EFI Boot Services Table. It provides access to the boot
 /// services.
+#[derive(Debug)]
 pub struct BootServices {
-    ptr: *const EfiBootServices,
+    /// The `EFI_BOOT_SERVICES` structure provided by the firmware.
+    boot_services: EfiBootServices,
 }
 
 impl BootServices {
@@ -674,51 +691,38 @@ impl BootServices {
     /// The Boot Services Table is created using a raw pointer. Thus, this
     /// function is considered to be unsafe.
     pub unsafe fn new(ptr: *const EfiBootServices) -> Result<Self, Error> {
+        let boot_services = core::ptr::read_unaligned(ptr);
+
         // Check table's signature.
-        if (*ptr).hdr.signature != EFI_BOOT_SERVICES_SIGNATURE {
+        if boot_services.hdr.signature != EFI_BOOT_SERVICES_SIGNATURE {
             return Err(Error::InvalidSignature);
         }
 
         // Check table's CRC32.
-        let mut boot_services_table = core::ptr::read_unaligned(ptr);
-        boot_services_table.hdr.crc32 = 0;
-        let crc32 = utils::crc32_for_value(boot_services_table);
-        if crc32 != (*ptr).hdr.crc32 {
+        let mut boot_services_crc32 = boot_services.clone();
+        boot_services_crc32.hdr.crc32 = 0;
+        let crc32 = utils::crc32_for_value(boot_services_crc32);
+        if crc32 != boot_services.hdr.crc32 {
             return Err(Error::InvalidCheckSum);
         }
 
-        Ok(BootServices { ptr })
+        Ok(BootServices { boot_services })
     }
 
-    /// Returns a monotonically increasing count for the platform.
-    pub fn get_next_monotonic_count(&self) -> StatusResult<u64> {
-        let mut count = 0u64;
-
-        let service = unsafe { (*self.ptr).get_next_monotonic_count };
-        let status = service(&mut count);
-
-        StatusResult::from((count, status.into()))
-    }
-
-    /// Returns the current memory map and its map key. The map is an array of
-    /// memory descriptors, each of which describes a contiguous block of
-    /// memory.
-    pub fn get_memory_map(
-        &self,
-    ) -> StatusResult<([Option<MemoryDescriptor>; MEMORY_MAP_LEN], usize)>
-    {
-        const BUFFER_SIZE: usize = 4096;
-
+    /// Returns a tuple with a `RangeSet` containing the available memory
+    /// blocks and the map key of the current memory map. This tuple has the
+    /// form `(available_memory_blocks, map_key)`.
+    pub fn get_available_memory(&self) -> Result<(RangeSet, usize), Error> {
         // Allocate the arguments of the boot service.
+        const BUFFER_SIZE: usize = 4096;
         let mut memory_map_size = BUFFER_SIZE;
         let mut memory_map = [0u8; BUFFER_SIZE];
         let mut map_key = 0usize;
         let mut descriptor_size = 0usize;
         let mut descriptor_version = 0u32;
 
-        // Call the boot service.
-        let service = unsafe { (*self.ptr).get_memory_map };
-        let status = service(
+        // Call `EFI_BOOT_SERVICES.GetMemoryMap()`.
+        let status = (self.boot_services.get_memory_map)(
             &mut memory_map_size,
             memory_map.as_mut_ptr(),
             &mut map_key,
@@ -726,14 +730,18 @@ impl BootServices {
             &mut descriptor_version,
         );
 
-        // Fill the array to be returned.
-        let mut ret = [None; MEMORY_MAP_LEN];
+        // Return with error in the case of warning and error status codes.
+        match status.into() {
+            Status::Success => {}
+            Status::Warning(warn) => return Err(Error::StatusWarning(warn)),
+            Status::Error(err) => return Err(Error::StatusError(err)),
+        }
+
+        // Fill the `RangeSet` to be returned.
+        let mut ret = RangeSet::new();
         let mut idx = 0;
         while (idx + 1) * descriptor_size <= memory_map_size {
-            if idx >= MEMORY_MAP_LEN {
-                return StatusResult::Err(StatusError::BufferTooSmall);
-            }
-
+            // Read the `EfiMemoryDescriptor`.
             let descriptor = unsafe {
                 let descriptor_ptr =
                     memory_map.as_ptr().add(idx * descriptor_size)
@@ -741,11 +749,51 @@ impl BootServices {
                 core::ptr::read(descriptor_ptr)
             };
 
-            ret[idx] = Some(descriptor.into());
+            // Add the memory block into the `RangeSet` if the memory is
+            // avaiable.
+            match MemoryType::from(descriptor.memory_type) {
+                // TODO(rm): Add `MemoryType::ACPIReclaimMemory` into the
+                // `RangeSet` after adding ACPI support to the kernel.
+                MemoryType::BootServicesCode
+                | MemoryType::BootServicesData
+                | MemoryType::ConventionalMemory => {
+                    let start = descriptor.physical_start.0;
+                    let size = descriptor.number_of_pages * 0x1000;
+                    let end = start + size - 1;
+                    ret.insert(Range::new(start, end)?)?;
+                }
+                _ => {}
+            }
 
             idx += 1;
         }
 
-        StatusResult::from(((ret, map_key), status.into()))
+        Ok((ret, map_key))
+    }
+
+    /// This function must be called by the currently executing UEFI OS loader
+    /// image to terminate all boot services. On success, the UEFI OS loader
+    /// becomes responsible for the continued operation of the system.
+    ///
+    /// A UEFI OS loader must ensure that it has the system's current memory
+    /// map at the time it calls this function. This is done by passing in the
+    /// current memory map's `map_key` value as returned by `get_memory_map`.
+    pub fn exit_boot_services(
+        &self,
+        image_handle: Handle,
+        map_key: usize,
+    ) -> Result<(), Error> {
+        // Call `EFI_BOOT_SERVICES.ExitBootServices()`.
+        let status =
+            (self.boot_services.exit_boot_services)(image_handle, map_key);
+
+        // Return with error in the case of warning and error status codes.
+        match status.into() {
+            Status::Success => {}
+            Status::Warning(warn) => return Err(Error::StatusWarning(warn)),
+            Status::Error(err) => return Err(Error::StatusError(err)),
+        }
+
+        Ok(())
     }
 }

@@ -9,7 +9,7 @@ use ticket_mutex::TicketMutex;
 static COM1: TicketMutex<Option<SerialPort>> = TicketMutex::new(None);
 
 /// Typically, COM1's IO port address.
-/// FIXME: Do not use a fixed address, get it from UEFI.
+/// FIXME(rm): Do not use a fixed address, get it from UEFI.
 const COM1_ADDRESS: u16 = 0x3f8;
 
 /// Initialize COM1 serial. It is used by `print!`.

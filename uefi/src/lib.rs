@@ -6,8 +6,9 @@ use core::convert::{TryFrom, TryInto};
 use core::ops::Deref;
 
 use mm::{PhysAddr, VirtAddr};
-use range::{Range, RangeSet};
 
+pub mod acpi;
+pub mod mem;
 mod utils;
 
 /// Represents an UEFI error.
@@ -24,6 +25,12 @@ pub enum Error {
 
     /// The size of the memory address does not match the target architecture.
     InvalidAddressSize,
+
+    /// Could not parse ACPI structures.
+    InvalidAcpiData,
+
+    /// The fixed size buffer is too small.
+    BufferTooSmall,
 
     /// The status code returned by an EFI interface is an error.
     StatusError(StatusError),
@@ -300,7 +307,7 @@ impl From<EfiStatus> for Status {
 
 /// Represents an UEFI handle. It is equivalent to the `EFI_HANDLE` type of the
 /// UEFI specification.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub struct Handle(usize);
 
@@ -313,9 +320,25 @@ impl Deref for Handle {
 }
 
 /// Represents a generic pointer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(transparent)]
-struct EfiPtr(usize);
+pub struct Ptr(pub usize);
+
+impl From<usize> for Ptr {
+    fn from(addr: usize) -> Self {
+        Ptr(addr)
+    }
+}
+
+impl TryFrom<u64> for Ptr {
+    type Error = Error;
+
+    fn try_from(addr: u64) -> Result<Self, Self::Error> {
+        let addr: usize =
+            addr.try_into().or(Err(Error::InvalidAddressSize))?;
+        Ok(addr.into())
+    }
+}
 
 /// The `EFI_TABLE_HEADER` type of the UEFI specification.
 #[derive(Debug, Clone)]
@@ -334,20 +357,20 @@ const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
 /// The `EFI_SYSTEM_TABLE` type of the UEFI specification.
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct EfiSystemTable {
+struct EfiSystemTable {
     hdr: EfiTableHeader,
-    firmware_vendor: EfiPtr,
+    firmware_vendor: Ptr,
     firmware_revision: u32,
     console_in_handle: Handle,
-    cons_in: EfiPtr,
+    cons_in: Ptr,
     console_out_handle: Handle,
-    cons_out: EfiPtr,
+    cons_out: Ptr,
     standard_error_handle: Handle,
-    std_err: EfiPtr,
-    runtime_services: EfiPtr,
-    boot_services: *const EfiBootServices,
+    std_err: Ptr,
+    runtime_services: Ptr,
+    boot_services: Ptr,
     number_of_table_entries: usize,
-    configuration_table: EfiPtr,
+    configuration_table: Ptr,
 }
 
 /// Represents the EFI System Table. It provides access to the boot and runtime
@@ -359,13 +382,14 @@ pub struct SystemTable {
 }
 
 impl SystemTable {
-    /// Creates a new `SystemTable` from a given `ptr`. Usually this pointer
-    /// is the `system_table` argument of the UEFI entry point.
+    /// Creates a new `SystemTable` from a given pointer `system_table_ptr`.
+    /// Usually this pointer is the `system_table` argument of the UEFI entry
+    /// point.
     ///
     /// ```ignore
     /// extern "C" fn efi_main(
     ///     image_handler: uefi::Handle,
-    ///     system_table: *const uefi::EfiSystemTable,
+    ///     system_table: uefi::Ptr,
     /// ) -> ! {
     ///     // ...
     /// }
@@ -378,10 +402,11 @@ impl SystemTable {
     ///
     /// # Safety
     ///
-    /// The System Table is created using a raw pointer. Thus, this function is
-    /// considered to be unsafe.
-    pub unsafe fn new(ptr: *const EfiSystemTable) -> Result<Self, Error> {
-        let system_table = core::ptr::read_unaligned(ptr);
+    /// The System Table is created using a pointer. Thus, this function is
+    /// considered unsafe.
+    pub unsafe fn new(system_table_ptr: Ptr) -> Result<Self, Error> {
+        let system_table_ptr = system_table_ptr.0 as *const EfiSystemTable;
+        let system_table = core::ptr::read_unaligned(system_table_ptr);
 
         // Check table's signature.
         if system_table.hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE {
@@ -402,9 +427,22 @@ impl SystemTable {
     /// Returns the boot services.
     pub fn boot_services(&self) -> Result<BootServices, Error> {
         // A `SystemTable` is only created after checking its signature
-        // and CRC32. Thus, we assume the pointer to the Boot Services Table
-        // will be valid.
+        // and CRC32. Thus, we assume that the pointer to the Boot Services
+        // Table will be valid.
         unsafe { BootServices::new(self.system_table.boot_services) }
+    }
+
+    /// Returns the configuration tables.
+    pub fn configuration_tables(&self) -> Result<ConfigurationTables, Error> {
+        // A `SystemTable` is only created after checking its signature
+        // and CRC32. Thus, we assume that the pointer to the Configuration
+        // Tables and the number of table entries are valid.
+        unsafe {
+            ConfigurationTables::new(
+                self.system_table.configuration_table,
+                self.system_table.number_of_table_entries,
+            )
+        }
     }
 }
 
@@ -422,7 +460,7 @@ impl From<EfiPhysAddr> for PhysAddr {
 /// Represents a virtual memory address. It is equivalent to the
 /// `EFI_VIRTUAL_ADDRESS` type of the UEFI specification.
 #[repr(transparent)]
-pub struct EfiVirtAddr(u64);
+struct EfiVirtAddr(u64);
 
 impl From<EfiVirtAddr> for VirtAddr {
     fn from(addr: EfiVirtAddr) -> Self {
@@ -593,16 +631,16 @@ const EFI_BOOT_SERVICES_SIGNATURE: u64 = 0x56524553544f4f42;
 /// The `EFI_BOOT_SERVICES` type of the UEFI specification.
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub struct EfiBootServices {
+struct EfiBootServices {
     hdr: EfiTableHeader,
 
     // Task priority services.
-    raise_tpl: EfiPtr,
-    restore_tpl: EfiPtr,
+    raise_tpl: Ptr,
+    restore_tpl: Ptr,
 
     // Memory services.
-    allocate_pages: EfiPtr,
-    free_pages: EfiPtr,
+    allocate_pages: Ptr,
+    free_pages: Ptr,
     get_memory_map: extern "C" fn(
         *mut usize,
         *mut u8,
@@ -610,64 +648,64 @@ pub struct EfiBootServices {
         *mut usize,
         *mut u32,
     ) -> EfiStatus,
-    allocate_pool: EfiPtr,
-    free_pool: EfiPtr,
+    allocate_pool: Ptr,
+    free_pool: Ptr,
 
     // Event & timer services.
-    create_event: EfiPtr,
-    set_timer: EfiPtr,
-    wait_for_event: EfiPtr,
-    signal_event: EfiPtr,
-    close_event: EfiPtr,
-    check_event: EfiPtr,
+    create_event: Ptr,
+    set_timer: Ptr,
+    wait_for_event: Ptr,
+    signal_event: Ptr,
+    close_event: Ptr,
+    check_event: Ptr,
 
     // Protocol handler services.
-    install_protocol_interface: EfiPtr,
-    reinstall_protocol_interface: EfiPtr,
-    uninstall_protocol_interface: EfiPtr,
-    handle_protocol: EfiPtr,
-    reserved: EfiPtr,
-    register_protocol_notify: EfiPtr,
-    locate_handle: EfiPtr,
-    locate_device_path: EfiPtr,
-    install_configuration_table: EfiPtr,
+    install_protocol_interface: Ptr,
+    reinstall_protocol_interface: Ptr,
+    uninstall_protocol_interface: Ptr,
+    handle_protocol: Ptr,
+    reserved: Ptr,
+    register_protocol_notify: Ptr,
+    locate_handle: Ptr,
+    locate_device_path: Ptr,
+    install_configuration_table: Ptr,
 
     // Image services.
-    load_image: EfiPtr,
-    start_image: EfiPtr,
-    exit: EfiPtr,
-    unload_image: EfiPtr,
+    load_image: Ptr,
+    start_image: Ptr,
+    exit: Ptr,
+    unload_image: Ptr,
     exit_boot_services:
         extern "C" fn(image_handle: Handle, map_key: usize) -> EfiStatus,
 
     // Miscelaneous services.
-    get_next_monotonic_count: EfiPtr,
-    stall: EfiPtr,
-    set_watchdog_timer: EfiPtr,
+    get_next_monotonic_count: Ptr,
+    stall: Ptr,
+    set_watchdog_timer: Ptr,
 
     // DriverSupport services.
-    connect_controller: EfiPtr,
-    disconnect_controller: EfiPtr,
+    connect_controller: Ptr,
+    disconnect_controller: Ptr,
 
     // Open and close protocol services.
-    open_protocol: EfiPtr,
-    close_protocol: EfiPtr,
-    open_protocol_information: EfiPtr,
+    open_protocol: Ptr,
+    close_protocol: Ptr,
+    open_protocol_information: Ptr,
 
     // Library services.
-    protocols_per_handle: EfiPtr,
-    locate_handle_buffer: EfiPtr,
-    locate_protocol: EfiPtr,
-    install_multiple_protocol_interfaces: EfiPtr,
-    uninstall_multiple_protocol_interfaces: EfiPtr,
+    protocols_per_handle: Ptr,
+    locate_handle_buffer: Ptr,
+    locate_protocol: Ptr,
+    install_multiple_protocol_interfaces: Ptr,
+    uninstall_multiple_protocol_interfaces: Ptr,
 
     // 32-bit CRC services.
-    calculate_crc32: EfiPtr,
+    calculate_crc32: Ptr,
 
     // Miscelaneous services.
-    copy_mem: EfiPtr,
-    set_mem: EfiPtr,
-    create_event_ex: EfiPtr,
+    copy_mem: Ptr,
+    set_mem: Ptr,
+    create_event_ex: Ptr,
 }
 
 /// Represents the EFI Boot Services Table. It provides access to the boot
@@ -679,7 +717,7 @@ pub struct BootServices {
 }
 
 impl BootServices {
-    /// Creates a new `BootServices` from a given `ptr`.
+    /// Creates a new `BootServices` from a given pointer `boot_services_ptr`.
     ///
     /// # Errors
     ///
@@ -688,10 +726,11 @@ impl BootServices {
     ///
     /// # Safety
     ///
-    /// The Boot Services Table is created using a raw pointer. Thus, this
-    /// function is considered to be unsafe.
-    pub unsafe fn new(ptr: *const EfiBootServices) -> Result<Self, Error> {
-        let boot_services = core::ptr::read_unaligned(ptr);
+    /// The Boot Services Table is created using a pointer. Thus, this function
+    /// is considered unsafe.
+    pub unsafe fn new(boot_services_ptr: Ptr) -> Result<Self, Error> {
+        let boot_services_ptr = boot_services_ptr.0 as *const EfiBootServices;
+        let boot_services = core::ptr::read_unaligned(boot_services_ptr);
 
         // Check table's signature.
         if boot_services.hdr.signature != EFI_BOOT_SERVICES_SIGNATURE {
@@ -707,68 +746,6 @@ impl BootServices {
         }
 
         Ok(BootServices { boot_services })
-    }
-
-    /// Returns a tuple with a `RangeSet` containing the available memory
-    /// blocks and the map key of the current memory map. This tuple has the
-    /// form `(available_memory_blocks, map_key)`.
-    pub fn get_available_memory(&self) -> Result<(RangeSet, usize), Error> {
-        // Allocate the arguments of the boot service.
-        const BUFFER_SIZE: usize = 4096;
-        let mut memory_map_size = BUFFER_SIZE;
-        let mut memory_map = [0u8; BUFFER_SIZE];
-        let mut map_key = 0usize;
-        let mut descriptor_size = 0usize;
-        let mut descriptor_version = 0u32;
-
-        // Call `EFI_BOOT_SERVICES.GetMemoryMap()`.
-        let status = (self.boot_services.get_memory_map)(
-            &mut memory_map_size,
-            memory_map.as_mut_ptr(),
-            &mut map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        );
-
-        // Return with error in the case of warning and error status codes.
-        match status.into() {
-            Status::Success => {}
-            Status::Warning(warn) => return Err(Error::StatusWarning(warn)),
-            Status::Error(err) => return Err(Error::StatusError(err)),
-        }
-
-        // Fill the `RangeSet` to be returned.
-        let mut ret = RangeSet::new();
-        let mut idx = 0;
-        while (idx + 1) * descriptor_size <= memory_map_size {
-            // Read the `EfiMemoryDescriptor`.
-            let descriptor = unsafe {
-                let descriptor_ptr =
-                    memory_map.as_ptr().add(idx * descriptor_size)
-                        as *const EfiMemoryDescriptor;
-                core::ptr::read(descriptor_ptr)
-            };
-
-            // Add the memory block into the `RangeSet` if the memory is
-            // avaiable.
-            match MemoryType::from(descriptor.memory_type) {
-                // TODO(rm): Add `MemoryType::ACPIReclaimMemory` into the
-                // `RangeSet` after adding ACPI support to the kernel.
-                MemoryType::BootServicesCode
-                | MemoryType::BootServicesData
-                | MemoryType::ConventionalMemory => {
-                    let start = descriptor.physical_start.0;
-                    let size = descriptor.number_of_pages * 0x1000;
-                    let end = start + size - 1;
-                    ret.insert(Range::new(start, end)?)?;
-                }
-                _ => {}
-            }
-
-            idx += 1;
-        }
-
-        Ok((ret, map_key))
     }
 
     /// This function must be called by the currently executing UEFI OS loader
@@ -795,5 +772,90 @@ impl BootServices {
         }
 
         Ok(())
+    }
+}
+
+/// The `EFI_GUID` type of the UEFI specification.
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+#[repr(C)]
+struct EfiGuid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+/// The `EFI_CONFIGURATION_TABLE` type of the UEFI specification.
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+struct EfiConfigurationTable {
+    vendor_guid: EfiGuid,
+    vendor_table: Ptr,
+}
+
+/// The EFI GUID for a pointer to the ACPI 2.0 or later specification RSDP.
+const EFI_ACPI_20_TABLE_GUID: EfiGuid = EfiGuid {
+    data1: 0x8868e871,
+    data2: 0xe4f1,
+    data3: 0x11d3,
+    data4: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
+};
+
+/// The maximum number of entries in `ConfigurationTables`.
+const EFI_CONFIGURATION_TABLES_LEN: usize = 32;
+
+/// Represents the EFI Configuration Tables. Among other things, it provides
+/// access to the ACPI structures.
+#[derive(Debug)]
+pub struct ConfigurationTables {
+    config_tables: [EfiConfigurationTable; EFI_CONFIGURATION_TABLES_LEN],
+    num_entries: usize,
+}
+
+impl ConfigurationTables {
+    /// Creates a new `ConfigurationTables` from a given pointer
+    /// `config_tables_ptr` and the number of table entries `num_entries`.
+    ///
+    /// # Safety
+    ///
+    /// The `ConfigurationTables` structure is created using a pointer.  Thus,
+    /// this function is considered unsafe.
+    pub unsafe fn new(
+        config_tables_ptr: Ptr,
+        num_entries: usize,
+    ) -> Result<Self, Error> {
+        if num_entries > EFI_CONFIGURATION_TABLES_LEN {
+            return Err(Error::BufferTooSmall);
+        }
+
+        let ptr = config_tables_ptr.0 as *const EfiConfigurationTable;
+
+        let mut config_tables =
+            [EfiConfigurationTable::default(); EFI_CONFIGURATION_TABLES_LEN];
+        for (i, it) in config_tables.iter_mut().take(num_entries).enumerate() {
+            *it = core::ptr::read_unaligned(ptr.add(i));
+        }
+
+        Ok(ConfigurationTables {
+            config_tables,
+            num_entries,
+        })
+    }
+
+    /// Returns a pointer to the Root System Description Pointer (RSDP)
+    /// structure for the ACPI 2.0 or later specification.
+    ///
+    /// # Errors
+    ///
+    /// This function will return `Error::InvalidAcpiData` if a configuration
+    /// table with a valid ACPI table GUID cannot be found.
+    pub fn acpi_rsdp20_ptr(&self) -> Result<Ptr, Error> {
+        for cfg_table in self.config_tables {
+            if cfg_table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
+                return Ok(cfg_table.vendor_table);
+            }
+        }
+
+        Err(Error::InvalidAcpiData)
     }
 }

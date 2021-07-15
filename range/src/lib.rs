@@ -427,6 +427,7 @@ mod tests {
         rangeset.insert(Range::new(40, 50).unwrap()).unwrap();
 
         rangeset.remove(Range::new(0, 19).unwrap()).unwrap();
+        rangeset.remove(Range::new(51, 70).unwrap()).unwrap();
 
         let want = [Range::new(20, 30).unwrap(), Range::new(40, 50).unwrap()];
         assert_eq!(rangeset.ranges(), want);

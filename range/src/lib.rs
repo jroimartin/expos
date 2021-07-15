@@ -264,7 +264,7 @@ impl RangeSet {
 
 impl Default for RangeSet {
     fn default() -> Self {
-        Self::new()
+        RangeSet::new()
     }
 }
 

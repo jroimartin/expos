@@ -15,7 +15,10 @@ tftp_dir=$(dirname "${efi_bin}")
 tftp_bootfile=$(basename "${efi_bin}")
 
 # Run QEMU downloading the kernel via tftp.
-qemu-system-x86_64 -nographic \
+qemu-system-x86_64 \
+	-nodefaults \
+	-nographic \
+	-serial mon:stdio \
 	-m 1024 \
 	-bios '/usr/share/ovmf/OVMF.fd' \
 	-device 'e1000,netdev=n0' \

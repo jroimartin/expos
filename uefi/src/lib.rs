@@ -20,6 +20,9 @@ pub enum Error {
     /// The CRC32 checksum of the table does not match the expected one.
     InvalidCheckSum,
 
+    /// The revision of the parsed table is not valid.
+    InvalidRevision,
+
     /// Invalid status code conversion.
     InvalidStatusConversion,
 
@@ -31,6 +34,9 @@ pub enum Error {
 
     /// The fixed size buffer is too small.
     BufferTooSmall,
+
+    /// The entity could not be found.
+    NotFound,
 
     /// The status code returned by an EFI interface is an error.
     StatusError(StatusError),
@@ -847,8 +853,8 @@ impl ConfigurationTables {
     ///
     /// # Errors
     ///
-    /// This function will return `Error::InvalidAcpiData` if a configuration
-    /// table with a valid ACPI table GUID cannot be found.
+    /// This function will return `Error::NotFound` if a configuration table
+    /// with a valid ACPI table GUID cannot be found.
     pub fn acpi_rsdp20_ptr(&self) -> Result<Ptr, Error> {
         for cfg_table in self.config_tables {
             if cfg_table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
@@ -856,6 +862,6 @@ impl ConfigurationTables {
             }
         }
 
-        Err(Error::InvalidAcpiData)
+        Err(Error::NotFound)
     }
 }

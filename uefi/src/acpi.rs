@@ -58,7 +58,7 @@ impl Rsdp20 {
 
         // Check table's revision.
         if rsdp20.revision < 2 {
-            return Err(Error::InvalidAcpiData);
+            return Err(Error::InvalidRevision);
         }
 
         // Check table's checksum.
@@ -210,6 +210,6 @@ impl Xsdt {
             }
         }
 
-        Err(Error::InvalidAcpiData)
+        Err(Error::NotFound)
     }
 }

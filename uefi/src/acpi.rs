@@ -5,16 +5,16 @@ use core::convert::TryInto;
 use crate::utils;
 use crate::{Error, Ptr};
 
-/// The signature of the RSDP structure.
+/// Signature of the RSDP structure.
 const ACPI_RSDP_SIGNATURE: &[u8] = b"RSD PTR ";
 
-/// The size of a SDT header.
+/// Size of the SDT header.
 const ACPI_SDT_SIZE: usize = core::mem::size_of::<AcpiSdtHeader>();
 
-/// The Root System Description Pointer (RSDP) structure for the ACPI 2.0 or
-/// later specification.
-#[derive(Debug)]
-#[repr(C)]
+/// Root System Description Pointer (RSDP) structure of the ACPI 2.0 and later
+/// specifications.
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
 struct AcpiRsdp20 {
     signature: [u8; 8],
     checksum: u8,
@@ -27,16 +27,14 @@ struct AcpiRsdp20 {
     reserved: [u8; 3],
 }
 
-/// Represents the Root System Description Pointer (RSDP) for the ACPI 2.0 or
-/// later specification.
+/// Represents the Root System Description Pointer (RSDP) of ACPI 2.0+.
 #[derive(Debug)]
 pub struct Rsdp20 {
-    /// The `RSDP` structure provided by ACPI.
     rsdp20: AcpiRsdp20,
 }
 
 impl Rsdp20 {
-    /// Creates a new `Rsdp` from a given pointer.
+    /// Creates a new `Rsdp20` from a given pointer.
     ///
     /// # Errors
     ///
@@ -45,8 +43,8 @@ impl Rsdp20 {
     ///
     /// # Safety
     ///
-    /// The `Rsdp` structure is created using a pointer. Thus, this function is
-    /// considered unsafe.
+    /// The `Rsdp20` structure is created using a pointer. Thus, this function
+    /// is considered unsafe.
     pub unsafe fn new(rsdp20_ptr: Ptr) -> Result<Self, Error> {
         let rsdp20_ptr = rsdp20_ptr.0 as *const AcpiRsdp20;
         let rsdp20 = core::ptr::read_unaligned(rsdp20_ptr);
@@ -73,26 +71,24 @@ impl Rsdp20 {
         Ok(Rsdp20 { rsdp20 })
     }
 
-    /// Returns the address of the Extended System Description Table (XSDT).
-    ///
-    /// # Errors
-    ///
-    /// This function returns error if the size of the address is not
-    /// compatible with the pointer size of the host.
-    pub fn xsdt_ptr(&self) -> Result<Ptr, Error> {
-        self.rsdp20.xsdt_addr.try_into()
+    /// Returns the Extended System Description Table (XSDT).
+    pub fn xsdt(&self) -> Result<Xsdt, Error> {
+        // An `Rsdp20` is only created after checking its signature, checksum
+        // and revision. Thus, we assume that the pointer to the XSDT
+        // will be valid.
+        unsafe { Xsdt::new(self.rsdp20.xsdt_addr.try_into()?) }
     }
 }
 
 /// System Description Table types.
-pub enum SdtType {
+enum SdtType {
     Xsdt,
     Madt,
 }
 
 impl SdtType {
     /// Returns the signature of the SDT.
-    pub fn signature(&self) -> &[u8] {
+    fn signature(&self) -> &[u8] {
         match self {
             SdtType::Xsdt => b"XSDT",
             SdtType::Madt => b"APIC",
@@ -100,10 +96,10 @@ impl SdtType {
     }
 }
 
-/// The System Description Table header, which is common to all System
-/// Description Tables.
-#[derive(Debug)]
-#[repr(C)]
+/// System Description Table header of the ACPI specification. It is common to
+/// all System Description Tables.
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
 struct AcpiSdtHeader {
     signature: [u8; 4],
     length: u32,
@@ -121,10 +117,10 @@ impl AcpiSdtHeader {
     ///
     /// # Errors
     ///
-    /// The function returns error if the signature of the table does not match
-    /// the provided `SdtType` or the checksum is invalid.
+    /// This function returns error if the signature of the table does not
+    /// match the provided `SdtType` or the checksum is invalid.
     unsafe fn new(sdt_ptr: Ptr, sdt_type: SdtType) -> Result<Self, Error> {
-        // Read SDT header.
+        // Parse SDT header.
         let sdt_ptr = sdt_ptr.0 as *const AcpiSdtHeader;
         let hdr = core::ptr::read_unaligned(sdt_ptr);
 
@@ -144,7 +140,7 @@ impl AcpiSdtHeader {
     }
 }
 
-/// The maximum number of entries in the XSDT.
+/// Maximum number of entries in the XSDT.
 const ACPI_XSDT_ENTRIES_LEN: usize = 32;
 
 /// Represents the Extended System Description Table (XSDT).
@@ -168,7 +164,7 @@ impl Xsdt {
     /// The `Xsdt` structure is created using a pointer. Thus, this function is
     /// considered unsafe.
     pub unsafe fn new(xsdt_ptr: Ptr) -> Result<Self, Error> {
-        // Create header.
+        // Parse header.
         let hdr = AcpiSdtHeader::new(xsdt_ptr, SdtType::Xsdt)?;
 
         // Calculate number of entries.
@@ -184,11 +180,10 @@ impl Xsdt {
             return Err(Error::BufferTooSmall);
         }
 
-        // Read entries.
+        // Parse entries.
         let mut entries = [0u64; ACPI_XSDT_ENTRIES_LEN];
         for (i, it) in entries.iter_mut().take(num_entries).enumerate() {
-            let ptr = (xsdt_ptr.0 as *const AcpiSdtHeader as *const u8)
-                .add(ACPI_SDT_SIZE + i * 8)
+            let ptr = (xsdt_ptr.0 as *const u8).add(ACPI_SDT_SIZE + i * 8)
                 as *const u64;
             *it = core::ptr::read_unaligned(ptr);
         }
@@ -200,16 +195,134 @@ impl Xsdt {
         })
     }
 
-    /// Returns the pointer to the Multiple APIC Description Table (MADT).
-    pub fn madt_ptr(&self) -> Result<Ptr, Error> {
+    /// Returns the Multiple APIC Description Table (MADT).
+    pub fn madt(&self) -> Result<Madt, Error> {
+        // An `Xsdt` is only created after checking its signature and checksum
+        // Thus, we assume that the pointer to the MADT will be valid.
+
         for &entry in self.entries.iter().take(self.num_entries) {
+            // Look for a table with the correct signature.
             let ptr = entry as *const [u8; 4];
             let signature = unsafe { core::ptr::read_unaligned(ptr) };
             if signature == SdtType::Madt.signature() {
-                return entry.try_into();
+                return unsafe { Madt::new(entry.try_into()?) };
             }
         }
 
+        // If we reach this point, the table could not be found.
         Err(Error::NotFound)
+    }
+}
+
+/// Size of the SDT header.
+const ACPI_MADT_FIELDS_SIZE: usize = core::mem::size_of::<AcpiMadtFields>();
+
+/// Maximum number of entries in the MADT.
+const ACPI_MADT_ENTRIES_LEN: usize = 256;
+
+/// Extra fields of the Multiple APIC Description Table (MADT) in the ACPI
+/// specification.
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+struct AcpiMadtFields {
+    lapic_addr: u32,
+    flags: u32,
+}
+
+/// Processor Local APIC Structure in the ACPI specification.
+#[repr(C, packed)]
+struct AcpiMadtLapic {
+    ty: u8,
+    length: u8,
+    proc_uid: u8,
+    apic_id: u8,
+    flags: u32,
+}
+
+/// Represents a Processor Local APIC Structure.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MadtLapic {
+    proc_uid: u8,
+    apic_id: u8,
+    flags: u32,
+}
+
+/// Represents the Multiple APIC Description Table (MADT).
+#[derive(Debug)]
+pub struct Madt {
+    hdr: AcpiSdtHeader,
+    fields: AcpiMadtFields,
+
+    lapic_entries: [MadtLapic; ACPI_MADT_ENTRIES_LEN],
+    num_lapic_entries: usize,
+}
+
+impl Madt {
+    /// Creates a new `Madt` from a given pointer.
+    ///
+    /// # Errors
+    ///
+    /// This function returns error if the pointer does not point to a valid
+    /// MADT.
+    ///
+    /// # Safety
+    ///
+    /// The `Madt` structure is created using a pointer. Thus, this function is
+    /// considered unsafe.
+    pub unsafe fn new(madt_ptr: Ptr) -> Result<Madt, Error> {
+        // Parse header.
+        let hdr = AcpiSdtHeader::new(madt_ptr, SdtType::Madt)?;
+
+        // Parse fields.
+        let fields = core::ptr::read_unaligned(
+            (madt_ptr.0 as *const u8).add(ACPI_SDT_SIZE)
+                as *const AcpiMadtFields,
+        );
+
+        // Parse entries.
+        let mut num_lapic_entries = 0;
+        let mut lapic_entries = [MadtLapic::default(); ACPI_MADT_ENTRIES_LEN];
+        let mut ptr = (madt_ptr.0 as *const u8)
+            .add(ACPI_SDT_SIZE + ACPI_MADT_FIELDS_SIZE);
+        let end = (madt_ptr.0 as *const u8).add(hdr.length as usize);
+        loop {
+            let ty = core::ptr::read_unaligned(ptr);
+            let length = core::ptr::read_unaligned(ptr.add(1));
+
+            let next_ptr = ptr.add(length as usize);
+
+            if next_ptr >= end {
+                break;
+            }
+
+            match ty {
+                // LAPIC
+                0 => {
+                    let lapic =
+                        core::ptr::read_unaligned(ptr as *const AcpiMadtLapic);
+                    lapic_entries[num_lapic_entries] = MadtLapic {
+                        proc_uid: lapic.proc_uid,
+                        apic_id: lapic.apic_id,
+                        flags: lapic.flags,
+                    };
+                    num_lapic_entries += 1;
+                }
+                _ => {}
+            }
+
+            ptr = next_ptr;
+        }
+
+        Ok(Madt {
+            hdr,
+            fields,
+            lapic_entries,
+            num_lapic_entries,
+        })
+    }
+
+    /// Returns the detected local APIC structures.
+    pub fn lapic(&self) -> &[MadtLapic] {
+        &self.lapic_entries[..self.num_lapic_entries]
     }
 }

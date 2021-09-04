@@ -4,6 +4,8 @@
 #![no_main]
 #![feature(panic_info_message)]
 
+use uefi::acpi;
+
 mod panic;
 mod serial;
 
@@ -18,7 +20,12 @@ extern "C" fn efi_main(
 
     let system_table =
         unsafe { uefi::SystemTable::new(system_table_ptr).unwrap() };
+
+    println!("{:#x?}", system_table);
+
     let boot_services = system_table.boot_services().unwrap();
+
+    println!("{:#x?}", boot_services);
 
     let (memory_map, map_key) =
         uefi::mem::get_available_memory(&boot_services).unwrap();
@@ -27,16 +34,24 @@ extern "C" fn efi_main(
 
     let config_tables = system_table.configuration_tables().unwrap();
 
+    println!("{:#x?}", config_tables);
+
     let rsdp20_ptr = config_tables.acpi_rsdp20_ptr().unwrap();
-    let rsdp20 = unsafe { uefi::acpi::Rsdp20::new(rsdp20_ptr).unwrap() };
+    let rsdp20 = unsafe { acpi::Rsdp20::new(rsdp20_ptr).unwrap() };
 
-    let xsdt_ptr = rsdp20.xsdt_ptr().unwrap();
-    let xsdt = unsafe { uefi::acpi::Xsdt::new(xsdt_ptr).unwrap() };
+    println!("{:#x?}", rsdp20);
 
-    let madt_ptr = xsdt.madt_ptr().unwrap();
+    let xsdt = rsdp20.xsdt().unwrap();
 
     println!("{:#x?}", xsdt);
-    println!("{:#x?}", madt_ptr);
+
+    let madt = xsdt.madt().unwrap();
+
+    println!("{:#x?}", madt);
+
+    let lapic = madt.lapic();
+
+    println!("{:#x?}", lapic);
 
     boot_services
         .exit_boot_services(image_handle, map_key)

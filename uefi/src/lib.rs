@@ -3,7 +3,6 @@
 #![no_std]
 
 use core::convert::{TryFrom, TryInto};
-use core::ops::Deref;
 
 use mm::{PhysAddr, VirtAddr};
 
@@ -315,26 +314,12 @@ impl From<EfiStatus> for Status {
 /// UEFI specification.
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub struct Handle(usize);
-
-impl Deref for Handle {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub struct Handle(pub usize);
 
 /// Represents a generic pointer.
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(transparent)]
 pub struct Ptr(pub usize);
-
-impl From<usize> for Ptr {
-    fn from(addr: usize) -> Self {
-        Ptr(addr)
-    }
-}
 
 impl TryFrom<u64> for Ptr {
     type Error = Error;
@@ -342,7 +327,7 @@ impl TryFrom<u64> for Ptr {
     fn try_from(addr: u64) -> Result<Self, Self::Error> {
         let addr: usize =
             addr.try_into().or(Err(Error::InvalidAddressSize))?;
-        Ok(addr.into())
+        Ok(Ptr(addr))
     }
 }
 

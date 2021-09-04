@@ -18,6 +18,7 @@ tftp_bootfile=$(basename "${efi_bin}")
 qemu-system-x86_64 \
 	-nodefaults \
 	-nographic \
+	-smp 'cores=4' \
 	-serial mon:stdio \
 	-m 1024 \
 	-bios '/usr/share/ovmf/OVMF.fd' \

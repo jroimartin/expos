@@ -325,8 +325,16 @@ impl TryFrom<u64> for Ptr {
     type Error = Error;
 
     fn try_from(addr: u64) -> Result<Self, Self::Error> {
-        let addr: usize =
-            addr.try_into().or(Err(Error::InvalidAddressSize))?;
+        let addr = addr.try_into().or(Err(Error::InvalidAddressSize))?;
+        Ok(Ptr(addr))
+    }
+}
+
+impl TryFrom<u32> for Ptr {
+    type Error = Error;
+
+    fn try_from(addr: u32) -> Result<Self, Self::Error> {
+        let addr = addr.try_into().or(Err(Error::InvalidAddressSize))?;
         Ok(Ptr(addr))
     }
 }
@@ -444,7 +452,7 @@ struct EfiPhysAddr(u64);
 
 impl From<EfiPhysAddr> for PhysAddr {
     fn from(addr: EfiPhysAddr) -> Self {
-        PhysAddr::from(addr.0)
+        PhysAddr(addr.0)
     }
 }
 
@@ -455,7 +463,7 @@ struct EfiVirtAddr(u64);
 
 impl From<EfiVirtAddr> for VirtAddr {
     fn from(addr: EfiVirtAddr) -> Self {
-        VirtAddr::from(addr.0)
+        VirtAddr(addr.0)
     }
 }
 

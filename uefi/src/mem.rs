@@ -29,8 +29,8 @@ pub fn get_available_memory(
     // Return with error in the case of warning and error status codes.
     match status.into() {
         Status::Success => {}
-        Status::Warning(warn) => return Err(Error::StatusWarning(warn)),
-        Status::Error(err) => return Err(Error::StatusError(err)),
+        Status::Warning(warn) => return Err(warn.into()),
+        Status::Error(err) => return Err(err.into()),
     }
 
     // Fill the `RangeSet` to be returned.

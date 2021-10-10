@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 cpu = { path = "../cpu" }
+range = { path = "../range" }
 serial = { path = "../serial" }
 ticket_mutex = { path = "../ticket_mutex" }
 uefi = { path = "../uefi" }

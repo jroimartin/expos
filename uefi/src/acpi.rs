@@ -146,7 +146,6 @@ const ACPI_XSDT_ENTRIES_LEN: usize = 32;
 /// Represents the Extended System Description Table (XSDT).
 #[derive(Debug)]
 pub struct Xsdt {
-    hdr: AcpiSdtHeader,
     entries: [u64; ACPI_XSDT_ENTRIES_LEN],
     num_entries: usize,
 }
@@ -189,7 +188,6 @@ impl Xsdt {
         }
 
         Ok(Xsdt {
-            hdr,
             entries,
             num_entries,
         })
@@ -247,10 +245,32 @@ pub struct MadtLapic {
     flags: u32,
 }
 
+impl MadtLapic {
+    /// Processor's UID.
+    pub fn proc_uid(&self) -> u8 {
+        self.proc_uid
+    }
+
+    /// Processor's local APIC ID.
+    pub fn acpi_id(&self) -> u8 {
+        self.apic_id
+    }
+
+    /// Local APIC flags.
+    ///
+    /// Bit offset | Bit length | Flag
+    /// ---------- | ---------- | ---------------
+    /// 0          | 1          | Enabled
+    /// 1          | 1          | Online Capable
+    /// 2          | 30         | Reserved (zero)
+    pub fn flags(&self) -> u32 {
+        self.flags
+    }
+}
+
 /// Represents the Multiple APIC Description Table (MADT).
 #[derive(Debug)]
 pub struct Madt {
-    hdr: AcpiSdtHeader,
     fields: AcpiMadtFields,
 
     lapic_entries: [MadtLapic; ACPI_MADT_ENTRIES_LEN],
@@ -282,43 +302,56 @@ impl Madt {
         // Parse entries.
         let mut num_lapic_entries = 0;
         let mut lapic_entries = [MadtLapic::default(); ACPI_MADT_ENTRIES_LEN];
+
         let mut ptr = (madt_ptr.0 as *const u8)
             .add(ACPI_SDT_SIZE + ACPI_MADT_FIELDS_SIZE);
         let end = (madt_ptr.0 as *const u8).add(hdr.length as usize);
-        loop {
+
+        while ptr < end {
             let ty = core::ptr::read_unaligned(ptr);
             let length = core::ptr::read_unaligned(ptr.add(1));
 
-            let next_ptr = ptr.add(length as usize);
-
-            if next_ptr >= end {
-                break;
-            }
-
-            match ty {
-                // LAPIC
-                0 => {
-                    let lapic =
-                        core::ptr::read_unaligned(ptr as *const AcpiMadtLapic);
-                    lapic_entries[num_lapic_entries] = MadtLapic {
-                        proc_uid: lapic.proc_uid,
-                        apic_id: lapic.apic_id,
-                        flags: lapic.flags,
-                    };
-                    num_lapic_entries += 1;
+            // LAPIC.
+            if ty == 0 {
+                if num_lapic_entries >= ACPI_MADT_ENTRIES_LEN {
+                    return Err(Error::BufferTooSmall);
                 }
-                _ => {}
+
+                let lapic =
+                    core::ptr::read_unaligned(ptr as *const AcpiMadtLapic);
+                lapic_entries[num_lapic_entries] = MadtLapic {
+                    proc_uid: lapic.proc_uid,
+                    apic_id: lapic.apic_id,
+                    flags: lapic.flags,
+                };
+                num_lapic_entries += 1;
             }
 
-            ptr = next_ptr;
+            ptr = ptr.add(length as usize);
         }
 
         Ok(Madt {
-            hdr,
             fields,
             lapic_entries,
             num_lapic_entries,
         })
+    }
+
+    /// Local Interrupt Controller Address. In other words, the 32-bit physical
+    /// address at which each processor can access its local interrupt
+    /// controller.
+    pub fn lapic_addr(&self) -> u32 {
+        self.fields.lapic_addr
+    }
+
+    /// Multiple ACPI flags.
+    ///
+    /// Bit offset | Bit length | Flag
+    /// ---------- | ---------- | ---------------
+    /// 0          | 1          | PCAT_COMPAT
+    /// 1          | 31         | Reserved (zero)
+    pub fn flags(&self) -> u32 {
+        self.fields.flags
     }
 
     /// Returns the detected local APIC structures.

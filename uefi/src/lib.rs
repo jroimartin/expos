@@ -316,7 +316,7 @@ impl From<EfiStatus> for Status {
 #[repr(transparent)]
 pub struct Handle(pub usize);
 
-/// Represents a generic pointer.
+/// Represents a pointer to UEFI memory.
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(transparent)]
 pub struct Ptr(pub usize);
@@ -849,7 +849,7 @@ impl ConfigurationTables {
     /// This function will return `Error::NotFound` if a configuration table
     /// with a valid ACPI table GUID cannot be found.
     pub fn acpi_rsdp20_ptr(&self) -> Result<Ptr, Error> {
-        for cfg_table in self.config_tables {
+        for cfg_table in &self.config_tables[..self.num_entries] {
             if cfg_table.vendor_guid == EFI_ACPI_20_TABLE_GUID {
                 return Ok(cfg_table.vendor_table);
             }

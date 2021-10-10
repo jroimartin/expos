@@ -47,11 +47,10 @@ pub fn get_available_memory(
         // Add the memory block into the `RangeSet` if the memory is
         // avaiable.
         match MemoryType::from(descriptor.memory_type) {
-            // TODO(rm): Add `MemoryType::ACPIReclaimMemory` into the
-            // `RangeSet` after adding ACPI support to the kernel.
             MemoryType::BootServicesCode
             | MemoryType::BootServicesData
-            | MemoryType::ConventionalMemory => {
+            | MemoryType::ConventionalMemory
+            | MemoryType::ACPIReclaimMemory => {
                 let start = descriptor.physical_start.0;
                 let size = descriptor.number_of_pages * 0x1000;
                 let end = start + size - 1;

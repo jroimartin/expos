@@ -16,7 +16,7 @@ pub enum Error {
 }
 
 /// Represents an inclusive range.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 pub struct Range {
     start: u64,
     end: u64,
@@ -68,12 +68,6 @@ impl Range {
     /// Returns the size of the range.
     pub fn size(&self) -> u64 {
         self.end - self.start + 1
-    }
-}
-
-impl Default for Range {
-    fn default() -> Self {
-        Range { start: 0, end: 0 }
     }
 }
 

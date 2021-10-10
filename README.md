@@ -31,7 +31,7 @@ RUSTFLAGS='-C link-arg=/debug:dwarf' ./tools/cargo-uefi.sh build
 
 ## Run in QEMU
 
-Run the following command to run the kernel in QEMU:
+Use the following command to run the kernel in QEMU:
 
 ```
 ./tools/cargo-uefi.sh run
@@ -39,10 +39,8 @@ Run the following command to run the kernel in QEMU:
 
 ## Test
 
-Run the following command to run the tests for a specific package:
+Use the following command to run the test suite:
 
 ```
-cargo test -p <package>
+cargo test
 ```
-
-Take into account that this command will fail for the `expos` package.

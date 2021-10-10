@@ -1,13 +1,15 @@
 //! expOS is a tiny Operating System focused on experimentation.
 
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![feature(panic_info_message)]
 
 use range::RangeSet;
 use uefi::acpi;
 
+#[cfg(not(test))]
 mod panic;
+
 mod serial;
 
 struct BootInfo {
